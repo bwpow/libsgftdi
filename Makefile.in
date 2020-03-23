@@ -1,0 +1,201 @@
+SRCDIR = src
+TESTSRCDIR = test
+
+LIBSOURCES = $(wildcard $(SRCDIR)/*.cpp)
+LIBCSOURCES = $(wildcard $(SRCDIR)/*.c)
+TESTSOURCES = $(wildcard $(TESTSRCDIR)/*.cpp)
+
+FULLFLAGS = -s -Iinclude
+FULLCFLAGS = -s -Iinclude/sgftdi
+MT_FULLDIR = $(OBJDIR)/full_mt
+MT_FULLLIB = $(LIBDIR)/libsgftdi_mt.a
+MT_FULLOBJS = $(addprefix $(MT_FULLDIR)/, $(LIBSOURCES:.cpp=.o) $(LIBCSOURCES:.c=.o))
+MT_FULLFLAGS = $(FULLFLAGS) -include sgftdi_mt.h
+MT_FULLCFLAGS = $(FULLCFLAGS)
+
+ST_FULLDIR = $(OBJDIR)/full_st
+ST_FULLLIB = $(LIBDIR)/libsgftdi_st.a
+ST_FULLOBJS = $(addprefix $(ST_FULLDIR)/, $(LIBSOURCES:.cpp=.o) $(LIBCSOURCES:.c=.o))
+ST_FULLFLAGS = $(FULLFLAGS) -include sgftdi_st.h
+ST_FULLCFLAGS = $(FULLCFLAGS)
+
+LITEFLAGS = -s -Iinclude
+LITECFLAGS = -s -Iinclude/sgftdi
+MT_LITEDIR = $(OBJDIR)/lite_mt
+MT_LITELIB = $(LIBDIR)/libsgftdilite_mt.a
+MT_LITEOBJS = $(addprefix $(MT_LITEDIR)/, $(LIBSOURCES:.cpp=.o) $(LIBCSOURCES:.c=.o))
+MT_LITEFLAGS = $(LITEFLAGS) -include sgftdilite_mt.h
+MT_LITECFLAGS = $(LITECFLAGS)
+
+ST_LITEDIR = $(OBJDIR)/lite_st
+ST_LITELIB = $(LIBDIR)/libsgftdilite_st.a
+ST_LITEOBJS = $(addprefix $(ST_LITEDIR)/, $(LIBSOURCES:.cpp=.o) $(LIBCSOURCES:.c=.o))
+ST_LITEFLAGS = $(LITEFLAGS) -include sgftdilite_st.h
+ST_LITECFLAGS = $(LITECFLAGS)
+
+DEBUGFLAGS = -g -Iinclude
+DEBUGCFLAGS = -g -Iinclude/sgftdi
+MT_DEBUGDIR = $(OBJDIR)/debug_mt
+MT_DEBUGLIB = $(LIBDIR)/libsgftdi_mt_debug.a
+MT_DEBUGOBJS = $(addprefix $(MT_DEBUGDIR)/, $(LIBSOURCES:.cpp=.o) $(LIBCSOURCES:.c=.o))
+MT_DEBUGFLAGS = $(DEBUGFLAGS) -include sgftdi_mt.h
+MT_DEBUGCFLAGS = $(DEBUGCFLAGS)
+
+ST_DEBUGDIR = $(OBJDIR)/debug_st
+ST_DEBUGLIB = $(LIBDIR)/libsgftdi_st_debug.a
+ST_DEBUGOBJS = $(addprefix $(ST_DEBUGDIR)/, $(LIBSOURCES:.cpp=.o) $(LIBCSOURCES:.c=.o))
+ST_DEBUGFLAGS = $(DEBUGFLAGS) -include sgftdi_st.h
+ST_DEBUGCFLAGS = $(DEBUGCFLAGS)
+
+TESTFLAGS = -g -Iinclude
+TESTLIBS = -lgtest -lusb-1.0
+MT_TESTDIR = $(OBJDIR)/test_mt
+MT_TESTBIN = $(BINDIR)/test_mt.$(BINEXT)
+MT_TESTOBJS = $(addprefix $(MT_TESTDIR)/, $(TESTSOURCES:.cpp=.o))
+MT_TESTFLAGS = $(TESTFLAGS) -include sgftdi_mt.h
+MT_TESTLIBS = -lshaga_mt $(TESTLIBS)
+
+ST_TESTDIR = $(OBJDIR)/test_st
+ST_TESTBIN = $(BINDIR)/test_st.$(BINEXT)
+ST_TESTOBJS = $(addprefix $(ST_TESTDIR)/, $(TESTSOURCES:.cpp=.o))
+ST_TESTFLAGS = $(TESTFLAGS) -include sgftdi_st.h
+ST_TESTLIBS = -lshaga_st $(TESTLIBS)
+
+.PHONY: all lib test prep clean distclean remake debug_mt debug_st full_mt full_st lite_mt lite_st test_mt test_st install
+
+all: | debug_mt debug_st full_mt full_st lite_mt lite_st test_mt test_st
+
+lib: | full_mt full_st lite_mt lite_st
+
+test: | test_mt test_st
+
+prep:
+	$(MKDIR) $(MT_FULLDIR)/$(SRCDIR)
+	$(MKDIR) $(ST_FULLDIR)/$(SRCDIR)
+	$(MKDIR) $(MT_LITEDIR)/$(SRCDIR)
+	$(MKDIR) $(ST_LITEDIR)/$(SRCDIR)
+	$(MKDIR) $(MT_DEBUGDIR)/$(SRCDIR)
+	$(MKDIR) $(ST_DEBUGDIR)/$(SRCDIR)
+	$(MKDIR) $(MT_TESTDIR)/$(TESTSRCDIR)
+	$(MKDIR) $(ST_TESTDIR)/$(TESTSRCDIR)
+	$(MKDIR) $(LIBDIR)
+	$(MKDIR) $(BINDIR)
+
+clean:
+	$(RM) -f $(MT_FULLLIB) $(MT_FULLOBJS) $(MT_LITELIB) $(MT_LITEOBJS) $(MT_DEBUGLIB) $(MT_DEBUGOBJS) $(MT_TESTBIN) $(MT_TESTOBJS)
+	$(RM) -f $(ST_FULLLIB) $(ST_FULLOBJS) $(ST_LITELIB) $(ST_LITEOBJS) $(ST_DEBUGLIB) $(ST_DEBUGOBJS) $(ST_TESTBIN) $(ST_TESTOBJS)
+
+distclean: clean
+	$(RM) -rf $(LIBDIR)/
+	$(RM) -rf $(OBJDIR)/
+	$(RM) -rf $(BINDIR)/
+
+remake: | clean all
+
+#############################################################################
+## DEBUG                                                                   ##
+#############################################################################
+debug_mt: | prep $(MT_DEBUGLIB)
+
+$(MT_DEBUGLIB): $(MT_DEBUGOBJS)
+	$(AR) rcsD $@ $^
+
+$(MT_DEBUGDIR)/%.o:%.cpp
+	$(GPP) $(MT_DEBUGFLAGS) $(MT_CPPFLAGS) -c $< -o $@
+
+$(MT_DEBUGDIR)/%.o:%.c
+	$(GCC) $(MT_DEBUGCFLAGS) $(MT_CFLAGS) -c $< -o $@
+
+# Single thread
+debug_st: | prep $(ST_DEBUGLIB)
+
+$(ST_DEBUGLIB): $(ST_DEBUGOBJS)
+	$(AR) rcsD $@ $^
+
+$(ST_DEBUGDIR)/%.o:%.cpp
+	$(GPP) $(ST_DEBUGFLAGS) $(ST_CPPFLAGS) -c $< -o $@
+
+$(ST_DEBUGDIR)/%.o:%.c
+	$(GCC) $(ST_DEBUGCFLAGS) $(ST_CFLAGS) -c $< -o $@
+
+#############################################################################
+## FULL                                                                    ##
+#############################################################################
+full_mt: | prep $(MT_FULLLIB)
+
+$(MT_FULLLIB): $(MT_FULLOBJS)
+	$(AR) rcsD $@ $^
+
+$(MT_FULLDIR)/%.o:%.cpp
+	$(GPP) $(MT_FULLFLAGS) $(MT_CPPFLAGS) -c $< -o $@
+
+$(MT_FULLDIR)/%.o:%.c
+	$(GCC) $(MT_FULLCFLAGS) $(MT_CFLAGS) -c $< -o $@
+
+# Single thread
+full_st: | prep $(ST_FULLLIB)
+
+$(ST_FULLLIB): $(ST_FULLOBJS)
+	$(AR) rcsD $@ $^
+
+$(ST_FULLDIR)/%.o:%.cpp
+	$(GPP) $(ST_FULLFLAGS) $(ST_CPPFLAGS) -c $< -o $@
+
+$(ST_FULLDIR)/%.o:%.c
+	$(GCC) $(ST_FULLCFLAGS) $(ST_CFLAGS) -c $< -o $@
+
+#############################################################################
+## LITE                                                                    ##
+#############################################################################
+lite_mt: | prep $(MT_LITELIB)
+
+$(MT_LITELIB): $(MT_LITEOBJS)
+	$(AR) rcsD $@ $^
+
+$(MT_LITEDIR)/%.o:%.cpp
+	$(GPP) $(MT_LITEFLAGS) $(MT_CPPFLAGS) -c $< -o $@
+
+$(MT_LITEDIR)/%.o:%.c
+	$(GCC) $(MT_LITECFLAGS) $(MT_CFLAGS) -c $< -o $@
+
+# Single thread
+lite_st: | prep $(ST_LITELIB)
+
+$(ST_LITELIB): $(ST_LITEOBJS)
+	$(AR) rcsD $@ $^
+
+$(ST_LITEDIR)/%.o:%.cpp
+	$(GPP) $(ST_LITEFLAGS) $(ST_CPPFLAGS) -c $< -o $@
+
+$(ST_LITEDIR)/%.o:%.c
+	$(GCC) $(ST_LITECFLAGS) $(ST_CFLAGS) -c $< -o $@
+
+#############################################################################
+## TEST                                                                    ##
+#############################################################################
+test_mt: | debug_mt $(MT_TESTBIN)
+
+$(MT_TESTBIN): $(MT_TESTOBJS) $(MT_DEBUGLIB)
+	$(GPP) $(MT_TESTFLAGS) $(MT_LDFLAGS) $^ $(MT_TESTLIBS) $(MT_LIBS) -o $@
+
+$(MT_TESTDIR)/%.o:%.cpp
+	$(GPP) $(MT_TESTFLAGS) $(MT_CPPFLAGS) -c $< -o $@
+
+# Single thread
+test_st: | debug_st $(ST_TESTBIN)
+
+$(ST_TESTBIN): $(ST_TESTOBJS) $(ST_DEBUGLIB)
+	$(GPP) $(ST_TESTFLAGS) $(ST_LDFLAGS) $^ $(ST_TESTLIBS) $(ST_LIBS) -o $@
+
+$(ST_TESTDIR)/%.o:%.cpp
+	$(GPP) $(ST_TESTFLAGS) $(ST_CPPFLAGS) -c $< -o $@
+
+#############################################################################
+## Install                                                                 ##
+#############################################################################
+install: full_mt full_st lite_mt lite_st
+	$(CP) -av ./include/* $(DESTINCLUDE)
+	$(CP) -v $(MT_FULLLIB) $(DESTLIB)
+	$(CP) -v $(ST_FULLLIB) $(DESTLIB)
+	$(CP) -v $(MT_LITELIB) $(DESTLIB)
+	$(CP) -v $(ST_LITELIB) $(DESTLIB)

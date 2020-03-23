@@ -1,0 +1,10 @@
+obj/
+lib/
+bin/
+win32*/
+*.cbp
+*.layout
+*.depend
+valgrind*
+*.sh
+*.save-failed
