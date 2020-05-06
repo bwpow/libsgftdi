@@ -126,14 +126,24 @@ void FtdiContext::populate_config (const shaga::INI *const ini, const std::strin
 		}
 	}
 
-	const uint8_t device = ini->get_uint8 (section, "device"sv, UINT8_MAX);
-	if (device != UINT8_MAX) {
-		_config.device = device;
+	const auto usb_vendor = STR::to_uint16 (ini->get_string (section, "usb_vendor"sv), 16);
+	if (usb_vendor != 0) {
+		_config.usb_vendor = usb_vendor;
 	}
 
-	const uint8_t port = ini->get_uint8 (section, "port"sv, UINT8_MAX);
+	const auto usb_product = STR::to_uint16 (ini->get_string (section, "usb_product"sv), 16);
+	if (usb_product != 0) {
+		_config.usb_product = usb_product;
+	}
+
+	const uint8_t device = ini->get_uint8 (section, "usb_device"sv, UINT8_MAX);
+	if (device != UINT8_MAX) {
+		_config.usb_device = device;
+	}
+
+	const uint8_t port = ini->get_uint8 (section, "ftdi_port"sv, UINT8_MAX);
 	if (port != UINT8_MAX) {
-		_config.port = port;
+		_config.ftdi_port = port;
 	}
 }
 
@@ -164,7 +174,7 @@ struct ftdi_context * FtdiContext::init (struct libusb_context *usb_ctx) try
 		cThrow ("Unable to allocate FTDI context"sv);
 	}
 
-	switch (_config.port) {
+	switch (_config.ftdi_port) {
 		case 0:
 			if (::ftdi_set_interface (_ctx, INTERFACE_A) != 0) {
 				cThrow ("Unable to set interface port A"sv);
@@ -190,14 +200,14 @@ struct ftdi_context * FtdiContext::init (struct libusb_context *usb_ctx) try
 			break;
 
 		default:
-			cThrow ("Bad port number {}"sv, _config.port);
+			cThrow ("Bad port number {}"sv, _config.ftdi_port);
 	}
 
 	struct ftdi_device_list *devlist = nullptr;
 	struct ftdi_device_list *curdev = nullptr;
 	struct libusb_device *usbdev = nullptr;
 
-	ret = ::ftdi_usb_find_all (_ctx, &devlist, 0, 0);
+	ret = ::ftdi_usb_find_all (_ctx, &devlist, _config.usb_vendor, _config.usb_product);
 	if (ret < 0) {
 		cThrow ("ftdi_usb_find_all failed: {} ({})"sv, ret, ::ftdi_get_error_string (_ctx));
 	}
@@ -205,7 +215,7 @@ struct ftdi_context * FtdiContext::init (struct libusb_context *usb_ctx) try
 	try {
 		uint32_t index = 0;
 		for (curdev = devlist; curdev != nullptr; ++index) {
-			if (index == _config.device) {
+			if (index == _config.usb_device) {
 				usbdev = curdev->dev;
 				break;
 			}
@@ -213,12 +223,12 @@ struct ftdi_context * FtdiContext::init (struct libusb_context *usb_ctx) try
 		}
 
 		if (nullptr == usbdev) {
-			cThrow ("Unable to find device {}"sv, _config.device);
+			cThrow ("Unable to find device {}"sv, _config.usb_device);
 		}
 
 		ret = ::ftdi_usb_open_dev (_ctx, usbdev);
 		if (ret < 0) {
-			cThrow ("Unable to open device {}: {}"sv, _config.device, ::ftdi_get_error_string (_ctx));
+			cThrow ("Unable to open device {}: {}"sv, _config.usb_device, ::ftdi_get_error_string (_ctx));
 		}
 
 		::ftdi_list_free (&devlist);
@@ -243,7 +253,9 @@ catch (...)
 
 	if (nullptr != _usb_ctx) {
 		::libusb_exit (_usb_ctx);
+		_usb_ctx = nullptr;
 	}
+
 	throw;
 }
 
@@ -256,6 +268,7 @@ void FtdiContext::clear (void)
 
 	if (nullptr != _usb_ctx) {
 		::libusb_exit (_usb_ctx);
+		_usb_ctx = nullptr;
 	}
 }
 

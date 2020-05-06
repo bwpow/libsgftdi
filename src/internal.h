@@ -18,7 +18,7 @@
 #include <sys/epoll.h>
 
 /* Multimap from file descriptor to stream state */
-typedef std::unordered_multimap<int, FtdiStreamStaticState> FtdiStreamStaticStates_t;
+typedef std::multimap<int, FtdiStreamStaticState> FtdiStreamStaticStates_t;
 
 class FtdiStreamState
 {
@@ -44,7 +44,7 @@ class FtdiStreamState
 		/* Timeout in secounds without any activity */
 		uint_fast64_t timeout {10};
 
-		/* Number of cancel loops unilt forced exit */
+		/* Number of cancel loops until forced exit */
 		int cancel_counter {3};
 
 		/* Is thread started */

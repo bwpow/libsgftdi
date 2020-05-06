@@ -33,8 +33,12 @@ class FtdiContext
 	public:
 		struct Config {
 			int speed {115'200};
-			uint8_t device {0};
-			uint8_t port {0};
+
+			int usb_vendor {0};
+			int usb_product {0};
+			uint8_t usb_device {0};
+
+			uint8_t ftdi_port {0};
 
 			enum ftdi_bits_type databits = BITS_8;
 			enum ftdi_stopbits_type stopbits = STOP_BIT_1;
@@ -134,10 +138,10 @@ class FtdiStreamEntry
 			- B7       Error in RCVR FIFO
 		*/
 
-		/* Important! Callbacks will be called from other thread. Don't forget about synchronization! */
+		/* Important! Callbacks will be called from FtdiStream thread. Don't forget about synchronization! */
 		typedef std::function<int(const CallbackType type, char * const buffer, const int len)> Callback;
 		typedef std::function<void(const bool is_reading, const uint_fast32_t tranfer_id, const uint_fast32_t cnt_callbacks, const uint_fast32_t cnt_bytes)> CounterCallback;
-		typedef std::function<void(void)> ResetCallback;
+		typedef std::function<void(struct ftdi_context * const ftdi)> ResetCallback;
 
 	private:
 		struct ftdi_context * const ftdi {nullptr};
