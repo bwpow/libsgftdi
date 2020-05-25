@@ -1,16 +1,40 @@
 GCC ?= gcc
 GPP ?= g++
 AR ?= ar
-RM ?= rm
+RM ?= rm -f
 CP ?= cp
 MKDIR ?= @mkdir -p
+STRIP ?= strip --strip-unneeded --preserve-dates
 
 DESTINCLUDE ?= /usr/local/include/
 DESTLIB ?= /usr/local/lib/
 
-ST_LIBS = -pie -lrt
-ST_CPPFLAGS = -pipe -fPIE -Wall -Wextra -Wshadow -fstack-protector-strong -O3 -std=c++17 -march=native -I$(DESTINCLUDE)
-ST_CFLAGS = -pipe -fPIE -Wshadow -fstack-protector-strong -O3 -std=c11 -march=native -I$(DESTINCLUDE)
+ST_LIBS = \
+	-pie \
+	-lrt
+
+ST_CPPFLAGS = \
+	-pipe \
+	-fPIE \
+	-Wall \
+	-Wextra \
+	-Wshadow \
+	-fstack-protector-strong \
+	-fsized-deallocation \
+	-O3 \
+	-std=c++17 \
+	-march=native \
+	-I$(DESTINCLUDE)
+
+ST_CFLAGS = \
+	-pipe \
+	-fPIE \
+	-Wshadow \
+	-fstack-protector-strong \
+	-O3 \
+	-std=c11 \
+	-march=native \
+	-I$(DESTINCLUDE)
 
 MT_LIBS = -pthread $(ST_LIBS)
 MT_CPPFLAGS = -pthread $(ST_CPPFLAGS)

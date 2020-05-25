@@ -12,26 +12,29 @@
 
 using namespace shaga;
 
-FtdiStreamState::FtdiStreamState (FtdiStreams &_streams) try :
+FtdiStreamState::FtdiStreamState (FtdiStreams &_streams) :
 	streams (_streams),
 	num_streams (streams.size ()),
 	error_spsc (64)
 {
-	if (0 == num_streams) {
-		cThrow ("No streams were defined"sv);
-	}
+	try {
+		if (0 == num_streams) {
+			cThrow ("No streams were defined"sv);
+		}
 
-	usb_ctx = streams.at (0).ftdi->usb_ctx;
+		usb_ctx = streams.at (0).ftdi->usb_ctx;
 
-	notice_event_fd = ::eventfd (0, 0);
-	if (notice_event_fd < 0) {
-		cThrow ("Unable to init eventfd: {}"sv, strerror (errno));
+		notice_event_fd = ::eventfd (0, 0);
+		if (notice_event_fd < 0) {
+			cThrow ("Unable to init eventfd: {}"sv, strerror (errno));
+		}
 	}
-}
-catch (...)
-{
-	if (notice_event_fd >= 0) {
-		::close (notice_event_fd);
+	catch (...)
+	{
+		if (notice_event_fd >= 0) {
+			::close (notice_event_fd);
+		}
+		throw;
 	}
 }
 
