@@ -2,8 +2,9 @@
 						  ftdi.c  -  description
 							 -------------------
 	begin                : Fri Apr 4 2003
-	copyright            : (C) 2003-2017 by Intra2net AG and the libftdi developers
+	copyright            : (C) 2003-2020 by Intra2net AG and the libftdi developers
 	email                : opensource@intra2net.com
+	SPDX-License-Identifier: LGPL-2.1-only
  ***************************************************************************/
 
 /***************************************************************************
@@ -35,6 +36,8 @@
 #include <stdlib.h>
 
 #include "ftdi_i.h"
+/* Prevent deprecated messages when building library */
+#define _FTDI_DISABLE_DEPRECATED
 #include "ftdi.h"
 #include "ftdi_version_i.h"
 
@@ -68,7 +71,6 @@ static void ftdi_usb_close_internal (struct ftdi_context *ftdi)
 	{
 		libusb_close (ftdi->usb_dev);
 		ftdi->usb_dev = NULL;
-
 		if(ftdi->eeprom)
 			ftdi->eeprom->initialized_for_connected_device = 0;
 	}
@@ -90,7 +92,7 @@ static void ftdi_usb_close_internal (struct ftdi_context *ftdi)
 */
 int ftdi_init(struct ftdi_context *ftdi)
 {
-	struct ftdi_eeprom* eeprom = (struct ftdi_eeprom *)malloc(sizeof(struct ftdi_eeprom));
+	struct ftdi_eeprom* eeprom;
 	ftdi->usb_ctx = NULL;
 	ftdi->usb_dev = NULL;
 	ftdi->usb_read_timeout = 5000;
@@ -114,6 +116,7 @@ int ftdi_init(struct ftdi_context *ftdi)
 	ftdi_set_interface(ftdi, INTERFACE_ANY);
 	ftdi->bitbang_mode = 1; /* when bitbang is enabled this holds the number of the mode  */
 
+	eeprom = (struct ftdi_eeprom *)malloc(sizeof(struct ftdi_eeprom));
 	if (eeprom == 0)
 		ftdi_error_return(-2, "Can't malloc struct ftdi_eeprom");
 	memset(eeprom, 0, sizeof(struct ftdi_eeprom));
@@ -616,6 +619,11 @@ int ftdi_usb_open_dev(struct ftdi_context *ftdi, libusb_device *dev)
 		if (libusb_detach_kernel_driver(ftdi->usb_dev, ftdi->interface) !=0)
 			detach_errno = errno;
 	}
+	else if (ftdi->module_detach_mode == AUTO_DETACH_REATACH_SIO_MODULE)
+	{
+		if (libusb_set_auto_detach_kernel_driver(ftdi->usb_dev, 1) != LIBUSB_SUCCESS)
+			detach_errno = errno;
+	}
 
 	if (libusb_get_configuration (ftdi->usb_dev, &cfg) < 0)
 		ftdi_error_return(-12, "libusb_get_configuration () failed");
@@ -1013,12 +1021,43 @@ int ftdi_usb_reset(struct ftdi_context *ftdi)
 
 /**
 	Clears the read buffer on the chip and the internal read buffer.
+	This is the correct behavior for an RX flush.
 
 	\param ftdi pointer to ftdi_context
 
 	\retval  0: all fine
 	\retval -1: read buffer purge failed
 	\retval -2: USB device unavailable
+*/
+int ftdi_tciflush(struct ftdi_context *ftdi)
+{
+	if (ftdi == NULL || ftdi->usb_dev == NULL)
+		ftdi_error_return(-2, "USB device unavailable");
+
+	if (libusb_control_transfer(ftdi->usb_dev, FTDI_DEVICE_OUT_REQTYPE,
+								SIO_RESET_REQUEST, SIO_TCIFLUSH,
+								ftdi->index, NULL, 0, ftdi->usb_write_timeout) < 0)
+		ftdi_error_return(-1, "FTDI purge of RX buffer failed");
+
+	// Invalidate data in the readbuffer
+	ftdi->readbuffer_offset = 0;
+	ftdi->readbuffer_remaining = 0;
+
+	return 0;
+}
+
+
+/**
+	Clears the write buffer on the chip and the internal read buffer.
+	This is incorrect behavior for an RX flush.
+
+	\param ftdi pointer to ftdi_context
+
+	\retval  0: all fine
+	\retval -1: write buffer purge failed
+	\retval -2: USB device unavailable
+
+	\deprecated Use \ref ftdi_tciflush(struct ftdi_context *ftdi)
 */
 int ftdi_usb_purge_rx_buffer(struct ftdi_context *ftdi)
 {
@@ -1039,12 +1078,39 @@ int ftdi_usb_purge_rx_buffer(struct ftdi_context *ftdi)
 
 /**
 	Clears the write buffer on the chip.
+	This is correct behavior for a TX flush.
 
 	\param ftdi pointer to ftdi_context
 
 	\retval  0: all fine
 	\retval -1: write buffer purge failed
 	\retval -2: USB device unavailable
+*/
+int ftdi_tcoflush(struct ftdi_context *ftdi)
+{
+	if (ftdi == NULL || ftdi->usb_dev == NULL)
+		ftdi_error_return(-2, "USB device unavailable");
+
+	if (libusb_control_transfer(ftdi->usb_dev, FTDI_DEVICE_OUT_REQTYPE,
+								SIO_RESET_REQUEST, SIO_TCOFLUSH,
+								ftdi->index, NULL, 0, ftdi->usb_write_timeout) < 0)
+		ftdi_error_return(-1, "FTDI purge of TX buffer failed");
+
+	return 0;
+}
+
+
+/**
+	Clears the read buffer on the chip.
+	This is incorrect behavior for a TX flush.
+
+	\param ftdi pointer to ftdi_context
+
+	\retval  0: all fine
+	\retval -1: read buffer purge failed
+	\retval -2: USB device unavailable
+
+	\deprecated Use \ref ftdi_tcoflush(struct ftdi_context *ftdi)
 */
 int ftdi_usb_purge_tx_buffer(struct ftdi_context *ftdi)
 {
@@ -1060,7 +1126,8 @@ int ftdi_usb_purge_tx_buffer(struct ftdi_context *ftdi)
 }
 
 /**
-	Clears the buffers on the chip and the internal read buffer.
+	Clears the RX and TX FIFOs on the chip and the internal read buffer.
+	This is correct behavior for both RX and TX flush.
 
 	\param ftdi pointer to ftdi_context
 
@@ -1068,6 +1135,37 @@ int ftdi_usb_purge_tx_buffer(struct ftdi_context *ftdi)
 	\retval -1: read buffer purge failed
 	\retval -2: write buffer purge failed
 	\retval -3: USB device unavailable
+*/
+int ftdi_tcioflush(struct ftdi_context *ftdi)
+{
+	int result;
+
+	if (ftdi == NULL || ftdi->usb_dev == NULL)
+		ftdi_error_return(-3, "USB device unavailable");
+
+	result = ftdi_tcoflush(ftdi);
+	if (result < 0)
+		return -1;
+
+	result = ftdi_tciflush(ftdi);
+	if (result < 0)
+		return -2;
+
+	return 0;
+}
+
+/**
+	Clears the buffers on the chip and the internal read buffer.
+	While coded incorrectly, the result is satisfactory.
+
+	\param ftdi pointer to ftdi_context
+
+	\retval  0: all fine
+	\retval -1: read buffer purge failed
+	\retval -2: write buffer purge failed
+	\retval -3: USB device unavailable
+
+	\deprecated Use \ref ftdi_tcioflush(struct ftdi_context *ftdi)
 */
 int ftdi_usb_purge_buffers(struct ftdi_context *ftdi)
 {
@@ -1896,7 +1994,7 @@ int ftdi_write_data_get_chunksize(struct ftdi_context *ftdi, unsigned int *chunk
 /**
 	Reads data in chunks (see ftdi_read_data_set_chunksize()) from the chip.
 
-	Automatically strips the two modem status bytes transfered during every read.
+	Automatically strips the two modem status bytes transferred during every read.
 
 	\param ftdi pointer to ftdi_context
 	\param buf Buffer to store data in
@@ -1911,13 +2009,14 @@ int ftdi_write_data_get_chunksize(struct ftdi_context *ftdi, unsigned int *chunk
 int ftdi_read_data(struct ftdi_context *ftdi, unsigned char *buf, int size)
 {
 	int offset = 0, ret, i, num_of_chunks, chunk_remains;
-	int packet_size = ftdi->max_packet_size;
+	int packet_size;
 	int actual_length = 1;
 
 	if (ftdi == NULL || ftdi->usb_dev == NULL)
 		ftdi_error_return(-666, "USB device unavailable");
 
 	// Packet size sanity check (avoid division by zero)
+	packet_size = ftdi->max_packet_size;
 	if (packet_size == 0)
 		ftdi_error_return(-1, "max_packet_size is bogus (zero)");
 
@@ -2265,9 +2364,11 @@ int ftdi_poll_modem_status(struct ftdi_context *ftdi, unsigned short *status)
 /**
 	Set flowcontrol for ftdi chip
 
+	Note: Do not use this function to enable XON/XOFF mode, use ftdi_setflowctrl_xonxoff() instead.
+
 	\param ftdi pointer to ftdi_context
 	\param flowctrl flow control to use. should be
-		   SIO_DISABLE_FLOW_CTRL, SIO_RTS_CTS_HS, SIO_DTR_DSR_HS or SIO_XON_XOFF_HS
+		   SIO_DISABLE_FLOW_CTRL, SIO_RTS_CTS_HS, SIO_DTR_DSR_HS
 
 	\retval  0: all fine
 	\retval -1: set flow control failed
@@ -2280,6 +2381,31 @@ int ftdi_setflowctrl(struct ftdi_context *ftdi, int flowctrl)
 
 	if (libusb_control_transfer(ftdi->usb_dev, FTDI_DEVICE_OUT_REQTYPE,
 								SIO_SET_FLOW_CTRL_REQUEST, 0, (flowctrl | ftdi->index),
+								NULL, 0, ftdi->usb_write_timeout) < 0)
+		ftdi_error_return(-1, "set flow control failed");
+
+	return 0;
+}
+
+/**
+	Set XON/XOFF flowcontrol for ftdi chip
+
+	\param ftdi pointer to ftdi_context
+	\param xon character code used to resume transmission
+	\param xoff character code used to pause transmission
+
+	\retval  0: all fine
+	\retval -1: set flow control failed
+	\retval -2: USB device unavailable
+*/
+int ftdi_setflowctrl_xonxoff(struct ftdi_context *ftdi, unsigned char xon, unsigned char xoff)
+{
+	if (ftdi == NULL || ftdi->usb_dev == NULL)
+		ftdi_error_return(-2, "USB device unavailable");
+
+	uint16_t xonxoff = xon | (xoff << 8);
+	if (libusb_control_transfer(ftdi->usb_dev, FTDI_DEVICE_OUT_REQTYPE,
+								SIO_SET_FLOW_CTRL_REQUEST, xonxoff, (SIO_XON_XOFF_HS | ftdi->index),
 								NULL, 0, ftdi->usb_write_timeout) < 0)
 		ftdi_error_return(-1, "set flow control failed");
 
@@ -2600,8 +2726,8 @@ int ftdi_eeprom_initdefaults(struct ftdi_context *ftdi, char * manufacturer,
 	return 0;
 }
 
-int ftdi_eeprom_set_strings(struct ftdi_context *ftdi, char * manufacturer,
-							char * product, char * serial)
+int ftdi_eeprom_set_strings(struct ftdi_context *ftdi, const char * manufacturer,
+							const char * product, const char * serial)
 {
 	struct ftdi_eeprom *eeprom;
 
@@ -3012,23 +3138,23 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 		case TYPE_2232C:
 
 			output[0x00] = type2bit(eeprom->channel_a_type, TYPE_2232C);
-			if ( eeprom->channel_a_driver == DRIVER_VCP)
+			if (eeprom->channel_a_driver)
 				output[0x00] |= DRIVER_VCP;
 			else
 				output[0x00] &= ~DRIVER_VCP;
 
-			if ( eeprom->high_current_a == HIGH_CURRENT_DRIVE)
+			if (eeprom->high_current_a)
 				output[0x00] |= HIGH_CURRENT_DRIVE;
 			else
 				output[0x00] &= ~HIGH_CURRENT_DRIVE;
 
 			output[0x01] = type2bit(eeprom->channel_b_type, TYPE_2232C);
-			if ( eeprom->channel_b_driver == DRIVER_VCP)
+			if (eeprom->channel_b_driver)
 				output[0x01] |= DRIVER_VCP;
 			else
 				output[0x01] &= ~DRIVER_VCP;
 
-			if ( eeprom->high_current_b == HIGH_CURRENT_DRIVE)
+			if (eeprom->high_current_b)
 				output[0x01] |= HIGH_CURRENT_DRIVE;
 			else
 				output[0x01] &= ~HIGH_CURRENT_DRIVE;
@@ -3056,8 +3182,15 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 			break;
 		case TYPE_R:
 			output[0x00] = type2bit(eeprom->channel_a_type, TYPE_R);
-			if (eeprom->high_current == HIGH_CURRENT_DRIVE_R)
+			if (eeprom->high_current)
 				output[0x00] |= HIGH_CURRENT_DRIVE_R;
+
+			/* Field is inverted for TYPE_R: Bit 00.3 set to 1 is D2XX, VCP is 0 */
+			if (eeprom->channel_a_driver)
+				output[0x00] &= ~DRIVER_VCP;
+			else
+				output[0x00] |= DRIVER_VCP;
+
 			if (eeprom->external_oscillator)
 				output[0x00] |= 0x02;
 			output[0x01] = 0x40; /* Hard coded Endpoint Size*/
@@ -3097,17 +3230,18 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 			break;
 		case TYPE_2232H:
 			output[0x00] = type2bit(eeprom->channel_a_type, TYPE_2232H);
-			if ( eeprom->channel_a_driver == DRIVER_VCP)
+			if (eeprom->channel_a_driver)
 				output[0x00] |= DRIVER_VCP;
 			else
 				output[0x00] &= ~DRIVER_VCP;
 
 			output[0x01] = type2bit(eeprom->channel_b_type, TYPE_2232H);
-			if ( eeprom->channel_b_driver == DRIVER_VCP)
+			if (eeprom->channel_b_driver)
 				output[0x01] |= DRIVER_VCP;
 			else
 				output[0x01] &= ~DRIVER_VCP;
-			if (eeprom->suspend_dbus7 == SUSPEND_DBUS7_BIT)
+
+			if (eeprom->suspend_dbus7)
 				output[0x01] |= SUSPEND_DBUS7_BIT;
 			else
 				output[0x01] &= ~SUSPEND_DBUS7_BIT;
@@ -3121,55 +3255,55 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 				output[0x0c] |= DRIVE_16MA;
 			else
 				output[0x0c] |= eeprom->group0_drive;
-			if (eeprom->group0_schmitt == IS_SCHMITT)
+			if (eeprom->group0_schmitt)
 				output[0x0c] |= IS_SCHMITT;
-			if (eeprom->group0_slew == SLOW_SLEW)
+			if (eeprom->group0_slew)
 				output[0x0c] |= SLOW_SLEW;
 
 			if (eeprom->group1_drive > DRIVE_16MA)
 				output[0x0c] |= DRIVE_16MA<<4;
 			else
 				output[0x0c] |= eeprom->group1_drive<<4;
-			if (eeprom->group1_schmitt == IS_SCHMITT)
+			if (eeprom->group1_schmitt)
 				output[0x0c] |= IS_SCHMITT<<4;
-			if (eeprom->group1_slew == SLOW_SLEW)
+			if (eeprom->group1_slew)
 				output[0x0c] |= SLOW_SLEW<<4;
 
 			if (eeprom->group2_drive > DRIVE_16MA)
 				output[0x0d] |= DRIVE_16MA;
 			else
 				output[0x0d] |= eeprom->group2_drive;
-			if (eeprom->group2_schmitt == IS_SCHMITT)
+			if (eeprom->group2_schmitt)
 				output[0x0d] |= IS_SCHMITT;
-			if (eeprom->group2_slew == SLOW_SLEW)
+			if (eeprom->group2_slew)
 				output[0x0d] |= SLOW_SLEW;
 
 			if (eeprom->group3_drive > DRIVE_16MA)
 				output[0x0d] |= DRIVE_16MA<<4;
 			else
 				output[0x0d] |= eeprom->group3_drive<<4;
-			if (eeprom->group3_schmitt == IS_SCHMITT)
+			if (eeprom->group3_schmitt)
 				output[0x0d] |= IS_SCHMITT<<4;
-			if (eeprom->group3_slew == SLOW_SLEW)
+			if (eeprom->group3_slew)
 				output[0x0d] |= SLOW_SLEW<<4;
 
 			output[0x18] = eeprom->chip;
 
 			break;
 		case TYPE_4232H:
-			if (eeprom->channel_a_driver == DRIVER_VCP)
+			if (eeprom->channel_a_driver)
 				output[0x00] |= DRIVER_VCP;
 			else
 				output[0x00] &= ~DRIVER_VCP;
-			if (eeprom->channel_b_driver == DRIVER_VCP)
+			if (eeprom->channel_b_driver)
 				output[0x01] |= DRIVER_VCP;
 			else
 				output[0x01] &= ~DRIVER_VCP;
-			if (eeprom->channel_c_driver == DRIVER_VCP)
+			if (eeprom->channel_c_driver)
 				output[0x00] |= (DRIVER_VCP << 4);
 			else
 				output[0x00] &= ~(DRIVER_VCP << 4);
-			if (eeprom->channel_d_driver == DRIVER_VCP)
+			if (eeprom->channel_d_driver)
 				output[0x01] |= (DRIVER_VCP << 4);
 			else
 				output[0x01] &= ~(DRIVER_VCP << 4);
@@ -3200,36 +3334,36 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 				output[0x0c] |= DRIVE_16MA;
 			else
 				output[0x0c] |= eeprom->group0_drive;
-			if (eeprom->group0_schmitt == IS_SCHMITT)
+			if (eeprom->group0_schmitt)
 				output[0x0c] |= IS_SCHMITT;
-			if (eeprom->group0_slew == SLOW_SLEW)
+			if (eeprom->group0_slew)
 				output[0x0c] |= SLOW_SLEW;
 
 			if (eeprom->group1_drive > DRIVE_16MA)
 				output[0x0c] |= DRIVE_16MA<<4;
 			else
 				output[0x0c] |= eeprom->group1_drive<<4;
-			if (eeprom->group1_schmitt == IS_SCHMITT)
+			if (eeprom->group1_schmitt)
 				output[0x0c] |= IS_SCHMITT<<4;
-			if (eeprom->group1_slew == SLOW_SLEW)
+			if (eeprom->group1_slew)
 				output[0x0c] |= SLOW_SLEW<<4;
 
 			if (eeprom->group2_drive > DRIVE_16MA)
 				output[0x0d] |= DRIVE_16MA;
 			else
 				output[0x0d] |= eeprom->group2_drive;
-			if (eeprom->group2_schmitt == IS_SCHMITT)
+			if (eeprom->group2_schmitt)
 				output[0x0d] |= IS_SCHMITT;
-			if (eeprom->group2_slew == SLOW_SLEW)
+			if (eeprom->group2_slew)
 				output[0x0d] |= SLOW_SLEW;
 
 			if (eeprom->group3_drive > DRIVE_16MA)
 				output[0x0d] |= DRIVE_16MA<<4;
 			else
 				output[0x0d] |= eeprom->group3_drive<<4;
-			if (eeprom->group3_schmitt == IS_SCHMITT)
+			if (eeprom->group3_schmitt)
 				output[0x0d] |= IS_SCHMITT<<4;
-			if (eeprom->group3_slew == SLOW_SLEW)
+			if (eeprom->group3_slew)
 				output[0x0d] |= SLOW_SLEW<<4;
 
 			output[0x18] = eeprom->chip;
@@ -3237,10 +3371,11 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 			break;
 		case TYPE_232H:
 			output[0x00] = type2bit(eeprom->channel_a_type, TYPE_232H);
-			if ( eeprom->channel_a_driver == DRIVER_VCP)
+			if (eeprom->channel_a_driver)
 				output[0x00] |= DRIVER_VCPH;
 			else
 				output[0x00] &= ~DRIVER_VCPH;
+
 			if (eeprom->powersave)
 				output[0x01] |= POWER_SAVE_DISABLE_H;
 			else
@@ -3263,22 +3398,23 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 				output[0x01] |= FT1284_FLOW_CONTROL;
 			else
 				output[0x01] &= ~FT1284_FLOW_CONTROL;
+
 			if (eeprom->group0_drive > DRIVE_16MA)
 				output[0x0c] |= DRIVE_16MA;
 			else
 				output[0x0c] |= eeprom->group0_drive;
-			if (eeprom->group0_schmitt == IS_SCHMITT)
+			if (eeprom->group0_schmitt)
 				output[0x0c] |= IS_SCHMITT;
-			if (eeprom->group0_slew == SLOW_SLEW)
+			if (eeprom->group0_slew)
 				output[0x0c] |= SLOW_SLEW;
 
 			if (eeprom->group1_drive > DRIVE_16MA)
 				output[0x0d] |= DRIVE_16MA;
 			else
 				output[0x0d] |= eeprom->group1_drive;
-			if (eeprom->group1_schmitt == IS_SCHMITT)
+			if (eeprom->group1_schmitt)
 				output[0x0d] |= IS_SCHMITT;
-			if (eeprom->group1_slew == SLOW_SLEW)
+			if (eeprom->group1_slew)
 				output[0x0d] |= SLOW_SLEW;
 
 			set_ft232h_cbus(eeprom, output);
@@ -3442,8 +3578,8 @@ int ftdi_eeprom_decode(struct ftdi_context *ftdi, int verbose)
 	// Bit 7: always 1
 	// Bit 6: 1 if this device is self powered, 0 if bus powered
 	// Bit 5: 1 if this device uses remote wakeup
-	eeprom->self_powered = buf[0x08] & 0x40;
-	eeprom->remote_wakeup = buf[0x08] & 0x20;
+	eeprom->self_powered = !!(buf[0x08] & 0x40);
+	eeprom->remote_wakeup = !!(buf[0x08] & 0x20);
 
 	// Addr 09: Max power consumption: max power = value * 2 mA
 	eeprom->max_power = MAX_POWER_MILLIAMP_PER_UNIT * buf[0x09];
@@ -3458,9 +3594,9 @@ int ftdi_eeprom_decode(struct ftdi_context *ftdi, int verbose)
 	// Bit 1: 1 - Out EndPoint is Isochronous
 	// Bit 0: 1 - In EndPoint is Isochronous
 	//
-	eeprom->in_is_isochronous  = buf[0x0A]&0x01;
-	eeprom->out_is_isochronous = buf[0x0A]&0x02;
-	eeprom->suspend_pull_downs = buf[0x0A]&0x04;
+	eeprom->in_is_isochronous  = !!(buf[0x0A]&0x01);
+	eeprom->out_is_isochronous = !!(buf[0x0A]&0x02);
+	eeprom->suspend_pull_downs = !!(buf[0x0A]&0x04);
 	eeprom->use_serial         = !!(buf[0x0A] & USE_SERIAL_NUM);
 	eeprom->use_usb_version    = !!(buf[0x0A] & USE_USB_VERSION_BIT);
 
@@ -3564,19 +3700,19 @@ int ftdi_eeprom_decode(struct ftdi_context *ftdi, int verbose)
 	else if (ftdi->type == TYPE_2232C)
 	{
 		eeprom->channel_a_type   = bit2type(buf[0x00] & 0x7);
-		eeprom->channel_a_driver = buf[0x00] & DRIVER_VCP;
-		eeprom->high_current_a   = buf[0x00] & HIGH_CURRENT_DRIVE;
+		eeprom->channel_a_driver = !!(buf[0x00] & DRIVER_VCP);
+		eeprom->high_current_a   = !!(buf[0x00] & HIGH_CURRENT_DRIVE);
 		eeprom->channel_b_type   = buf[0x01] & 0x7;
-		eeprom->channel_b_driver = buf[0x01] & DRIVER_VCP;
-		eeprom->high_current_b   = buf[0x01] & HIGH_CURRENT_DRIVE;
+		eeprom->channel_b_driver = !!(buf[0x01] & DRIVER_VCP);
+		eeprom->high_current_b   = !!(buf[0x01] & HIGH_CURRENT_DRIVE);
 		eeprom->chip = buf[0x14];
 	}
 	else if (ftdi->type == TYPE_R)
 	{
-		/* TYPE_R flags D2XX, not VCP as all others*/
-		eeprom->channel_a_driver = ~buf[0x00] & DRIVER_VCP;
-		eeprom->high_current     = buf[0x00] & HIGH_CURRENT_DRIVE_R;
-		eeprom->external_oscillator = buf[0x00] & 0x02;
+		/* TYPE_R flags D2XX, not VCP as all others */
+		eeprom->channel_a_driver = !(buf[0x00] & DRIVER_VCP);               /* note: inverted flag, use a single NOT */
+		eeprom->high_current     = !!(buf[0x00] & HIGH_CURRENT_DRIVE_R);
+		eeprom->external_oscillator = !!(buf[0x00] & 0x02);
 		if ( (buf[0x01]&0x40) != 0x40)
 			fprintf(stderr,
 					"TYPE_R EEPROM byte[0x01] Bit 6 unexpected Endpoint size."
@@ -3587,7 +3723,7 @@ int ftdi_eeprom_decode(struct ftdi_context *ftdi, int verbose)
 		eeprom->chip = buf[0x16];
 		// Addr 0B: Invert data lines
 		// Works only on FT232R, not FT245R, but no way to distinguish
-		eeprom->invert = buf[0x0B];
+		eeprom->invert = buf[0x0B];                                         /* note: not a bitflag */
 		// Addr 14: CBUS function: CBUS0, CBUS1
 		// Addr 15: CBUS function: CBUS2, CBUS3
 		// Addr 16: CBUS function: CBUS5
@@ -3599,53 +3735,53 @@ int ftdi_eeprom_decode(struct ftdi_context *ftdi, int verbose)
 	}
 	else if ((ftdi->type == TYPE_2232H) || (ftdi->type == TYPE_4232H))
 	{
-		eeprom->channel_a_driver = buf[0x00] & DRIVER_VCP;
-		eeprom->channel_b_driver = buf[0x01] & DRIVER_VCP;
+		eeprom->channel_a_driver = !!(buf[0x00] & DRIVER_VCP);
+		eeprom->channel_b_driver = !!(buf[0x01] & DRIVER_VCP);
 
 		if (ftdi->type == TYPE_2232H)
 		{
 			eeprom->channel_a_type   = bit2type(buf[0x00] & 0x7);
 			eeprom->channel_b_type   = bit2type(buf[0x01] & 0x7);
-			eeprom->suspend_dbus7    = buf[0x01] & SUSPEND_DBUS7_BIT;
+			eeprom->suspend_dbus7    = !!(buf[0x01] & SUSPEND_DBUS7_BIT);
 		}
 		else
 		{
-			eeprom->channel_c_driver = (buf[0x00] >> 4) & DRIVER_VCP;
-			eeprom->channel_d_driver = (buf[0x01] >> 4) & DRIVER_VCP;
-			eeprom->channel_a_rs485enable = buf[0x0b] & (CHANNEL_IS_RS485 << 0);
-			eeprom->channel_b_rs485enable = buf[0x0b] & (CHANNEL_IS_RS485 << 1);
-			eeprom->channel_c_rs485enable = buf[0x0b] & (CHANNEL_IS_RS485 << 2);
-			eeprom->channel_d_rs485enable = buf[0x0b] & (CHANNEL_IS_RS485 << 3);
+			eeprom->channel_c_driver = !!((buf[0x00] >> 4) & DRIVER_VCP);
+			eeprom->channel_d_driver = !!((buf[0x01] >> 4) & DRIVER_VCP);
+			eeprom->channel_a_rs485enable = !!(buf[0x0b] & (CHANNEL_IS_RS485 << 0));
+			eeprom->channel_b_rs485enable = !!(buf[0x0b] & (CHANNEL_IS_RS485 << 1));
+			eeprom->channel_c_rs485enable = !!(buf[0x0b] & (CHANNEL_IS_RS485 << 2));
+			eeprom->channel_d_rs485enable = !!(buf[0x0b] & (CHANNEL_IS_RS485 << 3));
 		}
 
 		eeprom->chip = buf[0x18];
-		eeprom->group0_drive   =  buf[0x0c]       & DRIVE_16MA;
-		eeprom->group0_schmitt =  buf[0x0c]       & IS_SCHMITT;
-		eeprom->group0_slew    =  buf[0x0c]       & SLOW_SLEW;
-		eeprom->group1_drive   = (buf[0x0c] >> 4) & 0x3;
-		eeprom->group1_schmitt = (buf[0x0c] >> 4) & IS_SCHMITT;
-		eeprom->group1_slew    = (buf[0x0c] >> 4) & SLOW_SLEW;
-		eeprom->group2_drive   =  buf[0x0d]       & DRIVE_16MA;
-		eeprom->group2_schmitt =  buf[0x0d]       & IS_SCHMITT;
-		eeprom->group2_slew    =  buf[0x0d]       & SLOW_SLEW;
-		eeprom->group3_drive   = (buf[0x0d] >> 4) & DRIVE_16MA;
-		eeprom->group3_schmitt = (buf[0x0d] >> 4) & IS_SCHMITT;
-		eeprom->group3_slew    = (buf[0x0d] >> 4) & SLOW_SLEW;
+		eeprom->group0_drive   = buf[0x0c]       & DRIVE_16MA;              /* not a bitflag */
+		eeprom->group0_schmitt = !!(buf[0x0c]       & IS_SCHMITT);
+		eeprom->group0_slew    = !!(buf[0x0c]       & SLOW_SLEW);
+		eeprom->group1_drive   = (buf[0x0c] >> 4) & DRIVE_16MA;             /* not a bitflag */
+		eeprom->group1_schmitt = !!((buf[0x0c] >> 4) & IS_SCHMITT);
+		eeprom->group1_slew    = !!((buf[0x0c] >> 4) & SLOW_SLEW);
+		eeprom->group2_drive   = buf[0x0d]       & DRIVE_16MA;              /* not a bitflag */
+		eeprom->group2_schmitt = !!(buf[0x0d]       & IS_SCHMITT);
+		eeprom->group2_slew    = !!(buf[0x0d]       & SLOW_SLEW);
+		eeprom->group3_drive   = (buf[0x0d] >> 4) & DRIVE_16MA;             /* not a bitflag */
+		eeprom->group3_schmitt = !!((buf[0x0d] >> 4) & IS_SCHMITT);
+		eeprom->group3_slew    = !!((buf[0x0d] >> 4) & SLOW_SLEW);
 	}
 	else if (ftdi->type == TYPE_232H)
 	{
 		eeprom->channel_a_type   = buf[0x00] & 0xf;
-		eeprom->channel_a_driver = (buf[0x00] & DRIVER_VCPH)?DRIVER_VCP:0;
-		eeprom->clock_polarity =  buf[0x01]       & FT1284_CLK_IDLE_STATE;
-		eeprom->data_order     =  buf[0x01]       & FT1284_DATA_LSB;
-		eeprom->flow_control   =  buf[0x01]       & FT1284_FLOW_CONTROL;
-		eeprom->powersave      =  buf[0x01]       & POWER_SAVE_DISABLE_H;
-		eeprom->group0_drive   =  buf[0x0c]       & DRIVE_16MA;
-		eeprom->group0_schmitt =  buf[0x0c]       & IS_SCHMITT;
-		eeprom->group0_slew    =  buf[0x0c]       & SLOW_SLEW;
-		eeprom->group1_drive   =  buf[0x0d]       & DRIVE_16MA;
-		eeprom->group1_schmitt =  buf[0x0d]       & IS_SCHMITT;
-		eeprom->group1_slew    =  buf[0x0d]       & SLOW_SLEW;
+		eeprom->channel_a_driver = !!(buf[0x00] & DRIVER_VCPH);
+		eeprom->clock_polarity =  !!(buf[0x01]       & FT1284_CLK_IDLE_STATE);
+		eeprom->data_order     =  !!(buf[0x01]       & FT1284_DATA_LSB);
+		eeprom->flow_control   =  !!(buf[0x01]       & FT1284_FLOW_CONTROL);
+		eeprom->powersave      =  !!(buf[0x01]       & POWER_SAVE_DISABLE_H);
+		eeprom->group0_drive   =  buf[0x0c]       & DRIVE_16MA;             /* not a bitflag */
+		eeprom->group0_schmitt =  !!(buf[0x0c]       & IS_SCHMITT);
+		eeprom->group0_slew    =  !!(buf[0x0c]       & SLOW_SLEW);
+		eeprom->group1_drive   =  buf[0x0d]       & DRIVE_16MA;             /* not a bitflag */
+		eeprom->group1_schmitt =  !!(buf[0x0d]       & IS_SCHMITT);
+		eeprom->group1_slew    =  !!(buf[0x0d]       & SLOW_SLEW);
 
 		for(i=0; i<5; i++)
 		{
@@ -3661,14 +3797,14 @@ int ftdi_eeprom_decode(struct ftdi_context *ftdi, int verbose)
 		{
 			eeprom->cbus_function[i] =  buf[0x1a + i] & 0xFF;
 		}
-		eeprom->group0_drive   =  buf[0x0c]       & 0x03;
-		eeprom->group0_schmitt =  buf[0x0c]       & IS_SCHMITT;
-		eeprom->group0_slew    =  buf[0x0c]       & SLOW_SLEW;
-		eeprom->group1_drive   = (buf[0x0c] >> 4) & 0x03;
-		eeprom->group1_schmitt = (buf[0x0c] >> 4) & IS_SCHMITT;
-		eeprom->group1_slew    = (buf[0x0c] >> 4) & SLOW_SLEW;
+		eeprom->group0_drive   = buf[0x0c]       & DRIVE_16MA;              /* not a bitflag */
+		eeprom->group0_schmitt = !!(buf[0x0c]       & IS_SCHMITT);
+		eeprom->group0_slew    = !!(buf[0x0c]       & SLOW_SLEW);
+		eeprom->group1_drive   = (buf[0x0c] >> 4) & DRIVE_16MA;             /* not a bitflag */
+		eeprom->group1_schmitt = !!((buf[0x0c] >> 4) & IS_SCHMITT);
+		eeprom->group1_slew    = !!((buf[0x0c] >> 4) & SLOW_SLEW);
 
-		eeprom->invert = buf[0xb];
+		eeprom->invert = buf[0xb];                                          /* not a bitflag */
 	}
 
 	if (verbose)

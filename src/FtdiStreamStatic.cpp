@@ -384,7 +384,7 @@ class FtdiStreamStatic
 					}
 
 					/* Purge anything remaining in the buffers*/
-					if (::ftdi_usb_purge_buffers (stream.ftdi) < 0) {
+					if (::ftdi_tcioflush (stream.ftdi) < 0) {
 						cThrow ("Can't Purge"sv);
 					}
 				}
