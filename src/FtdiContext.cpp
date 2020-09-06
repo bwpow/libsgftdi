@@ -12,6 +12,21 @@
 
 using namespace shaga;
 
+bool FtdiContext::get_string_descriptor_ascii (libusb_device_handle *devh, uint8_t desc_idx, std::string &str)
+{
+	str.resize (512);
+
+	const int ret = ::libusb_get_string_descriptor_ascii (devh, desc_idx, reinterpret_cast<unsigned char *> (str.data ()), str.size ());
+	if (ret < 0) {
+		str.clear ();
+		return false;
+	}
+	else {
+		str.resize (ret);
+		return true;
+	}
+}
+
 void FtdiContext::set_ftdi_params (void)
 {
 	int ret;
@@ -230,6 +245,15 @@ struct ftdi_context * FtdiContext::init (struct libusb_context *usb_ctx) try
 		if (ret < 0) {
 			cThrow ("Unable to open device {}: {}"sv, _config.usb_device, ::ftdi_get_error_string (_ctx));
 		}
+
+		struct libusb_device_descriptor desc;
+		if (::libusb_get_device_descriptor (usbdev, &desc) != 0) {
+			cThrow ("Unable to get device {} descriptor"sv, _config.usb_device);
+		}
+
+		get_string_descriptor_ascii (_ctx->usb_dev, desc.iManufacturer, _manufacturer);
+		get_string_descriptor_ascii (_ctx->usb_dev, desc.iProduct, _description);
+		get_string_descriptor_ascii (_ctx->usb_dev, desc.iSerialNumber, _serial);
 
 		::ftdi_list_free (&devlist);
 	}

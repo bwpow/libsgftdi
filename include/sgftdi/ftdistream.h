@@ -57,8 +57,13 @@ class FtdiContext
 		struct libusb_context *_usb_ctx {nullptr};
 		const bool _create_libusb_context {true};
 
+		std::string _manufacturer;
+		std::string _description;
+		std::string _serial;
+
 		Config _config;
 
+		bool get_string_descriptor_ascii (libusb_device_handle *devh, uint8_t desc_idx, std::string &str);
 		void set_ftdi_params (void);
 
 	public:
@@ -84,6 +89,23 @@ class FtdiContext
 			return _config;
 		}
 
+		template<typename T = std::string_view>
+		SHAGA_STRV T get_manufacturer (void) const
+		{
+			return _manufacturer;
+		}
+
+		template<typename T = std::string_view>
+		SHAGA_STRV T get_description (void) const
+		{
+			return _description;
+		}
+
+		template<typename T = std::string_view>
+		SHAGA_STRV T get_serial (void) const
+		{
+			return _serial;
+		}
 };
 
 class FtdiStreamEntry
