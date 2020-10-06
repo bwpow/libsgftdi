@@ -12,6 +12,46 @@
 
 using namespace shaga;
 
+void FtdiContext::USBdev::reset (void)
+{
+	vendor = 0;
+	product = 0;
+	device = 0;
+}
+
+void FtdiContext::USBdev::parse (const std::string_view str)
+{
+	vendor = 0;
+	product = 0;
+	device = 0;
+
+	COMMON_LIST vec = STR::split<COMMON_LIST> (str, ":");
+
+	if (vec.size () < 1 || vec.size () > 3) {
+		cThrow ("Bad format of USB device string '{}'"sv, str);
+	}
+
+	if (vec.empty () == false) {
+		vendor = STR::to_int32 (vec.front (), 16);
+		vec.pop_front ();
+	}
+
+	if (vec.empty () == false) {
+		product = STR::to_int32 (vec.front (), 16);
+		vec.pop_front ();
+	}
+
+	if (vec.empty () == false) {
+		device = STR::to_uint8 (vec.front ());
+		vec.pop_front ();
+	}
+}
+
+std::string FtdiContext::USBdev::describe (void) const
+{
+	return fmt::format ("{:04x}:{:04x}:{}"sv, vendor, product, device);
+}
+
 bool FtdiContext::get_string_descriptor_ascii (libusb_device_handle *devh, uint8_t desc_idx, std::string &str)
 {
 	str.resize (512);
@@ -141,6 +181,12 @@ void FtdiContext::populate_config (const shaga::INI *const ini, const std::strin
 		}
 	}
 
+	for (const auto &str : ini->get_list (section, "usb_devices")) {
+		USBdev usb_device;
+		usb_device.parse (str);
+		_config.usb_devices.push_back (std::move (usb_device));
+	}
+/*
 	const auto usb_vendor = STR::to_uint16 (ini->get_string (section, "usb_vendor"sv), 16);
 	if (usb_vendor != 0) {
 		_config.usb_vendor = usb_vendor;
@@ -155,7 +201,7 @@ void FtdiContext::populate_config (const shaga::INI *const ini, const std::strin
 	if (device != UINT8_MAX) {
 		_config.usb_device = device;
 	}
-
+*/
 	const uint8_t port = ini->get_uint8 (section, "ftdi_port"sv, UINT8_MAX);
 	if (port != UINT8_MAX) {
 		_config.ftdi_port = port;
@@ -218,50 +264,66 @@ struct ftdi_context * FtdiContext::init (struct libusb_context *usb_ctx) try
 			cThrow ("Bad port number {}"sv, _config.ftdi_port);
 	}
 
-	struct ftdi_device_list *devlist = nullptr;
-	struct ftdi_device_list *curdev = nullptr;
-	struct libusb_device *usbdev = nullptr;
+	bool found {false};
 
-	ret = ::ftdi_usb_find_all (_ctx, &devlist, _config.usb_vendor, _config.usb_product);
-	if (ret < 0) {
-		cThrow ("ftdi_usb_find_all failed: {} ({})"sv, ret, ::ftdi_get_error_string (_ctx));
-	}
-
-	try {
-		uint32_t index = 0;
-		for (curdev = devlist; curdev != nullptr; ++index) {
-			if (index == _config.usb_device) {
-				usbdev = curdev->dev;
-				break;
-			}
-			curdev = curdev->next;
+	for (const auto &dev : _config.usb_devices) {
+		if (true == found) {
+			break;
 		}
 
-		if (nullptr == usbdev) {
-			cThrow ("Unable to find device {}"sv, _config.usb_device);
-		}
+		struct ftdi_device_list *devlist {nullptr};
+		struct ftdi_device_list *curdev {nullptr};
+		struct libusb_device *usbdev {nullptr};
 
-		ret = ::ftdi_usb_open_dev (_ctx, usbdev);
+		ret = ::ftdi_usb_find_all (_ctx, &devlist, dev.vendor, dev.product);
 		if (ret < 0) {
-			cThrow ("Unable to open device {}: {}"sv, _config.usb_device, ::ftdi_get_error_string (_ctx));
+			cThrow ("ftdi_usb_find_all failed: {} ({})"sv, ret, ::ftdi_get_error_string (_ctx));
 		}
 
-		struct libusb_device_descriptor desc;
-		if (::libusb_get_device_descriptor (usbdev, &desc) != 0) {
-			cThrow ("Unable to get device {} descriptor"sv, _config.usb_device);
-		}
+		try {
+			uint32_t index = 0;
+			for (curdev = devlist; curdev != nullptr; ++index) {
+				if (index == dev.device) {
+					usbdev = curdev->dev;
+					break;
+				}
+				curdev = curdev->next;
+			}
 
-		get_string_descriptor_ascii (_ctx->usb_dev, desc.iManufacturer, _manufacturer);
-		get_string_descriptor_ascii (_ctx->usb_dev, desc.iProduct, _description);
-		get_string_descriptor_ascii (_ctx->usb_dev, desc.iSerialNumber, _serial);
+			if (nullptr == usbdev) {
+				::ftdi_list_free (&devlist);
+				continue;
+			}
 
-		::ftdi_list_free (&devlist);
-	}
-	catch (...) {
-		if (devlist != nullptr) {
+			ret = ::ftdi_usb_open_dev (_ctx, usbdev);
+			if (ret < 0) {
+				cThrow ("Unable to open device {}: {}"sv, dev.describe (), ::ftdi_get_error_string (_ctx));
+			}
+
+			struct libusb_device_descriptor desc;
+			if (::libusb_get_device_descriptor (usbdev, &desc) != 0) {
+				cThrow ("Unable to get device {} descriptor"sv, dev.describe ());
+			}
+
+			get_string_descriptor_ascii (_ctx->usb_dev, desc.iManufacturer, _manufacturer);
+			get_string_descriptor_ascii (_ctx->usb_dev, desc.iProduct, _description);
+			get_string_descriptor_ascii (_ctx->usb_dev, desc.iSerialNumber, _serial);
+
+			_config.usb_device = dev;
+			found = true;
+
 			::ftdi_list_free (&devlist);
 		}
-		throw;
+		catch (...) {
+			if (devlist != nullptr) {
+				::ftdi_list_free (&devlist);
+			}
+			throw;
+		}
+	}
+
+	if (false == found) {
+		cThrow ("Unable to find usb device"sv);
 	}
 
 	set_ftdi_params ();

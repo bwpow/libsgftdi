@@ -31,12 +31,23 @@ class FtdiStreamState;
 class FtdiContext
 {
 	public:
-		struct Config {
+		struct USBdev
+		{
+			int vendor {0};
+			int product {0};
+			uint8_t device {0};
+
+			void reset (void);
+			void parse (const std::string_view str);
+			std::string describe (void) const;
+		};
+
+		struct Config
+		{
 			int speed {115'200};
 
-			int usb_vendor {0};
-			int usb_product {0};
-			uint8_t usb_device {0};
+			std::list<USBdev> usb_devices;
+			USBdev usb_device;
 
 			uint8_t ftdi_port {0};
 
