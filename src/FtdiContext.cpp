@@ -1,6 +1,6 @@
 /*
 *    ShaGa FTDI library - extension to libftdi1 using libshaga
-*    Copyright (c) 2016-2020, SAGE team s.r.o., Samuel Kupka
+*    Copyright (c) 2016-2021, SAGE team s.r.o., Samuel Kupka
 *
 *    This library is distributed under the
 *    GNU Library General Public License version 2.
@@ -19,7 +19,7 @@ void FtdiContext::USBdev::reset (void)
 	device = 0;
 }
 
-void FtdiContext::USBdev::parse (const std::string_view str)
+void FtdiContext::USBdev::parse (const std::string_view str, const bool check_valid)
 {
 	vendor = 0;
 	product = 0;
@@ -33,11 +33,17 @@ void FtdiContext::USBdev::parse (const std::string_view str)
 
 	if (vec.empty () == false) {
 		vendor = STR::to_int32 (vec.front (), 16);
+		if (vendor >= 0xffff) {
+			cThrow ("USB device vendor '{:x}' out of bounds"sv, vendor);
+		}
 		vec.pop_front ();
 	}
 
 	if (vec.empty () == false) {
 		product = STR::to_int32 (vec.front (), 16);
+		if (product >= 0xffff) {
+			cThrow ("USB device product '{:x}' out of bounds"sv, product);
+		}
 		vec.pop_front ();
 	}
 
@@ -45,11 +51,32 @@ void FtdiContext::USBdev::parse (const std::string_view str)
 		device = STR::to_uint8 (vec.front ());
 		vec.pop_front ();
 	}
+
+	if (true == check_valid && is_valid () == false) {
+		cThrow ("USB device '{}' is not valid"sv, describe ());
+	}
+}
+
+bool FtdiContext::USBdev::is_valid (void) const
+{
+	if (vendor < 0 || vendor >= 0xffff) {
+		return false;
+	}
+	if (product < 0 || product >= 0xffff) {
+		return false;
+	}
+
+	return true;
 }
 
 std::string FtdiContext::USBdev::describe (void) const
 {
-	return fmt::format ("{:04x}:{:04x}:{}"sv, vendor, product, device);
+	if (device > 0) {
+		return fmt::format ("{:04x}:{:04x}:{}"sv, vendor, product, device);
+	}
+	else {
+		return fmt::format ("{:04x}:{:04x}"sv, vendor, product);
+	}
 }
 
 bool FtdiContext::get_string_descriptor_ascii (libusb_device_handle *devh, uint8_t desc_idx, std::string &str)
@@ -224,12 +251,11 @@ struct ftdi_context * FtdiContext::init (struct libusb_context *usb_ctx) try
 				cThrow ("Unable to init USB: {}"sv, ::libusb_error_name (ret));
 			}
 			::libusb_set_pollfd_notifiers (_usb_ctx, nullptr, nullptr, nullptr);
-			_ctx = ::ftdi_new_ex (_usb_ctx);
+			_libusb_context_created = true;
 		}
 	}
-	else {
-		_ctx = ::ftdi_new_ex (usb_ctx);
-	}
+
+	_ctx = ::ftdi_new_ex (usb_ctx);
 
 	if (nullptr == _ctx) {
 		cThrow ("Unable to allocate FTDI context"sv);
@@ -337,9 +363,11 @@ catch (...)
 		_ctx = nullptr;
 	}
 
-	if (nullptr != _usb_ctx) {
-		::libusb_exit (_usb_ctx);
-		_usb_ctx = nullptr;
+	if (true == _libusb_context_created) {
+		if (nullptr != _usb_ctx) {
+			::libusb_exit (_usb_ctx);
+			_usb_ctx = nullptr;
+		}
 	}
 
 	throw;
@@ -352,9 +380,11 @@ void FtdiContext::clear (void)
 		_ctx = nullptr;
 	}
 
-	if (nullptr != _usb_ctx) {
-		::libusb_exit (_usb_ctx);
-		_usb_ctx = nullptr;
+	if (true == _libusb_context_created) {
+		if (nullptr != _usb_ctx) {
+			::libusb_exit (_usb_ctx);
+			_usb_ctx = nullptr;
+		}
 	}
 }
 
@@ -366,4 +396,9 @@ struct ftdi_context * FtdiContext::get_context (void) const noexcept
 struct libusb_context * FtdiContext::get_libusb_context (void) const noexcept
 {
 	return _usb_ctx;
+}
+
+bool FtdiContext::created_libusb_context (void) const noexcept
+{
+	return _libusb_context_created;
 }

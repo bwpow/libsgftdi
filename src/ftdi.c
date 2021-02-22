@@ -2972,7 +2972,7 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 	user_area_size  -= (manufacturer_size + product_size + serial_size) * 2;
 
 	if (user_area_size < 0)
-		ftdi_error_return(-1,"eeprom size exceeded");
+		ftdi_error_return(-1,"eeprom size exceeded (1)");
 
 	// empty eeprom
 	if (ftdi->type == TYPE_230X)

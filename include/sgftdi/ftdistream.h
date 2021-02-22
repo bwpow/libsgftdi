@@ -1,6 +1,6 @@
 /*
 *    ShaGa FTDI library - extension to libftdi1 using libshaga
-*    Copyright (c) 2016-2020, SAGE team s.r.o., Samuel Kupka
+*    Copyright (c) 2016-2021, SAGE team s.r.o., Samuel Kupka
 *
 *    This library is distributed under the
 *    GNU Library General Public License version 2.
@@ -38,7 +38,8 @@ class FtdiContext
 			uint8_t device {0};
 
 			void reset (void);
-			void parse (const std::string_view str);
+			void parse (const std::string_view str, const bool check_valid = false);
+			bool is_valid (void) const;
 			std::string describe (void) const;
 		};
 
@@ -67,6 +68,7 @@ class FtdiContext
 		struct ftdi_context *_ctx {nullptr};
 		struct libusb_context *_usb_ctx {nullptr};
 		const bool _create_libusb_context {true};
+		bool _libusb_context_created {false};
 
 		std::string _manufacturer;
 		std::string _description;
@@ -94,6 +96,8 @@ class FtdiContext
 		/* Return context or nullptr if no context has been generated yet */
 		struct ftdi_context * get_context (void) const noexcept;
 		struct libusb_context * get_libusb_context (void) const noexcept;
+
+		bool created_libusb_context (void) const noexcept;
 
 		Config & get_config (void)
 		{
