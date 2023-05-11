@@ -21,6 +21,13 @@ ST_CPPFLAGS = \
 	-Wall \
 	-Wextra \
 	-Wshadow \
+	-Wduplicated-cond \
+	-Wduplicated-branches \
+	-Wlogical-op \
+	-Wrestrict \
+	-Wnull-dereference \
+	-Wdouble-promotion \
+	-Wno-unknown-warning-option \
 	-fstack-protector-strong \
 	-fsized-deallocation \
 	-O3 \
@@ -31,7 +38,16 @@ ST_CPPFLAGS = \
 ST_CFLAGS = \
 	-pipe \
 	-fPIE \
+	-Wall \
+	-Wextra \
 	-Wshadow \
+	-Wduplicated-cond \
+	-Wduplicated-branches \
+	-Wlogical-op \
+	-Wrestrict \
+	-Wnull-dereference \
+	-Wdouble-promotion \
+	-Wno-unknown-warning-option \
 	-fstack-protector-strong \
 	-O3 \
 	-std=c11 \
@@ -43,7 +59,7 @@ MT_CPPFLAGS = -pthread $(ST_CPPFLAGS)
 MT_CFLAGS = -pthread $(ST_CFLAGS)
 
 ifdef SHAGA_SANITY
-	SANITY = -fsanitize=address -fsanitize=undefined -fsanitize=leak -fno-omit-frame-pointer
+	SANITY = -fsanitize=address -fsanitize=undefined -fsanitize=leak -fsanitize-address-use-after-scope -fno-omit-frame-pointer
 	ST_LIBS += $(SANITY)
 	ST_CPPFLAGS += $(SANITY)
 	ST_CFLAGS += $(SANITY)

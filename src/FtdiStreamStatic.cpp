@@ -1,6 +1,6 @@
 /*
 *    ShaGa FTDI library - extension to libftdi1 using libshaga
-*    Copyright (c) 2016-2021, SAGE team s.r.o., Samuel Kupka
+*    Copyright (c) 2016-2023, SAGE team s.r.o., Samuel Kupka
 *
 *    This library is distributed under the
 *    GNU Library General Public License version 2.
@@ -17,6 +17,28 @@
 #include <fcntl.h>
 
 using namespace shaga;
+
+static const char* libusb_transfer_status_name (const enum libusb_transfer_status status)
+{
+    switch (status) {
+        case LIBUSB_TRANSFER_COMPLETED:
+            return "TRANSFER_COMPLETED";
+        case LIBUSB_TRANSFER_ERROR:
+            return "TRANSFER_ERROR";
+        case LIBUSB_TRANSFER_TIMED_OUT:
+            return "TRANSFER_TIMED_OUT";
+        case LIBUSB_TRANSFER_CANCELLED:
+            return "TRANSFER_CANCELLED";
+        case LIBUSB_TRANSFER_STALL:
+            return "TRANSFER_STALL";
+        case LIBUSB_TRANSFER_NO_DEVICE:
+            return "TRANSFER_NO_DEVICE";
+        case LIBUSB_TRANSFER_OVERFLOW:
+            return "TRANSFER_OVERFLOW";
+        default:
+            return "UNKNOWN_STATUS";
+    }
+}
 
 class FtdiStreamStatic
 {
@@ -85,9 +107,14 @@ class FtdiStreamStatic
 						char *ptr = reinterpret_cast<char *> (transfer->buffer);
 						uint32_t length = transfer->actual_length;
 
+//						if (0 == streamstate->stream_id && 0 == streamstate->transfer_id) {
+//							state->error_spsc.push_back (fmt::format ("len={}, read_packetsize={}"sv, length, state->read_packetsize));
+//						}
+
 						/* One transfer can contain more messages. Each message is at most state->read_packetsize bytes */
 						while (length > 0) {
 							const uint32_t packetLen = std::min (length, state->read_packetsize);
+							//P::print ("{} {}"sv, length, packetLen);
 
 							FtdiStreamEntry &entry = state->streams[streamstate->stream_id];
 							if (true == streamstate->is_modem_status) {
@@ -119,7 +146,7 @@ class FtdiStreamStatic
 					}
 				}
 				else {
-					cThrow ("Unknown state"sv);
+					cThrow ("Unexpected LIBUSB_TRANSFER state {}"sv, libusb_transfer_status_name (transfer->status));
 				}
 			}
 			catch (const std::exception &e) {
@@ -449,10 +476,10 @@ class FtdiStreamStatic
 					cThrow ("Unable to init epoll: {}"sv, strerror (errno));
 				}
 				else {
-					add_to_epoll (state->usb_epoll_fd, EPOLLIN | EPOLLET, state);
+					add_to_epoll (state->usb_epoll_fd, EPOLLIN, state);
 				}
 
-				add_to_epoll (state->notice_event_fd, EPOLLIN | EPOLLET, state);
+				add_to_epoll (state->notice_event_fd, EPOLLIN, state);
 
 				state->timer_fd = ::timerfd_create (CLOCK_MONOTONIC, TFD_NONBLOCK);
 				if (state->timer_fd < 0) {
@@ -466,11 +493,11 @@ class FtdiStreamStatic
 					timspec.it_value.tv_sec = 0;
 					timspec.it_value.tv_nsec = 1;
 
-					if (timerfd_settime (state->timer_fd, 0, &timspec, 0) != 0) {
+					if (::timerfd_settime (state->timer_fd, 0, &timspec, 0) != 0) {
 						cThrow ("Unable to start timer_fd: {}"sv, strerror (errno));
 					}
 
-					add_to_epoll (state->timer_fd, EPOLLIN | EPOLLET, state);
+					add_to_epoll (state->timer_fd, EPOLLIN, state);
 				}
 
 				if (const struct libusb_pollfd** pollfd = ::libusb_get_pollfds (state->usb_ctx); nullptr != pollfd) {
@@ -672,6 +699,7 @@ void FtdiStreamStaticState::init (FtdiStreamEntry &stream)
 	if (true == is_reading) {
 		enabled = stream.read_start_enabled;
 		buffer_size = state->read_packetsize * stream.read_packets_per_transfer;
+
 		::libusb_fill_bulk_transfer (
 			transfer, // the transfer to populate
 			stream.ftdi->usb_dev, // handle of the device that will handle the transfer
@@ -705,7 +733,7 @@ void FtdiStreamStaticState::init (FtdiStreamEntry &stream)
 	transfer->flags = 0;
 
 	if (false == is_reading) {
-		FtdiStreamStatic::add_to_epoll (eventfd, EPOLLIN | EPOLLET, state);
+		FtdiStreamStatic::add_to_epoll (eventfd, EPOLLIN, state);
 	}
 
 	submit ();

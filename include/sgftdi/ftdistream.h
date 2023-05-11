@@ -1,6 +1,6 @@
 /*
 *    ShaGa FTDI library - extension to libftdi1 using libshaga
-*    Copyright (c) 2016-2021, SAGE team s.r.o., Samuel Kupka
+*    Copyright (c) 2016-2023, SAGE team s.r.o., Samuel Kupka
 *
 *    This library is distributed under the
 *    GNU Library General Public License version 2.

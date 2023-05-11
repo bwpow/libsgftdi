@@ -1335,17 +1335,17 @@ static int ftdi_to_clkbits(int baudrate, unsigned int clk, int clk_div, unsigned
 	static const char frac_code[8] = {0, 3, 2, 4, 1, 5, 6, 7};
 	int best_baud = 0;
 	int divisor, best_divisor;
-	if (baudrate >=  clk/clk_div)
+	if ((unsigned int)baudrate >=  clk/clk_div)
 	{
 		*encoded_divisor = 0;
 		best_baud = clk/clk_div;
 	}
-	else if (baudrate >=  clk/(clk_div + clk_div/2))
+	else if ((unsigned int)baudrate >=  clk/(clk_div + clk_div/2))
 	{
 		*encoded_divisor = 1;
 		best_baud = clk/(clk_div + clk_div/2);
 	}
-	else if (baudrate >=  clk/(2*clk_div))
+	else if ((unsigned int)baudrate >=  clk/(2*clk_div))
 	{
 		*encoded_divisor = 2;
 		best_baud = clk/(2*clk_div);
@@ -3046,10 +3046,13 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 		case TYPE_2232H:
 		case TYPE_4232H:
 			i += 2;
+			__attribute__((fallthrough));
 		case TYPE_R:
 			i += 2;
+			__attribute__((fallthrough));
 		case TYPE_2232C:
 			i += 2;
+			__attribute__((fallthrough));
 		case TYPE_AM:
 		case TYPE_BM:
 			i += 0x94;
@@ -3440,15 +3443,20 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 	{
 		case TYPE_230X:
 			free_start += 2;
+			__attribute__((fallthrough));
 		case TYPE_232H:
 			free_start += 6;
+			__attribute__((fallthrough));
 		case TYPE_2232H:
 		case TYPE_4232H:
 			free_start += 2;
+			__attribute__((fallthrough));
 		case TYPE_R:
 			free_start += 2;
+			__attribute__((fallthrough));
 		case TYPE_2232C:
 			free_start++;
+			__attribute__((fallthrough));
 		case TYPE_AM:
 		case TYPE_BM:
 			free_start += 0x14;
@@ -3477,7 +3485,7 @@ int ftdi_eeprom_build(struct ftdi_context *ftdi)
 			i = 0x40;
 		}
 		if ((ftdi->type == TYPE_230X) && (i >=  0x40) && (i < 0x50)) {
-			uint16_t data;
+			uint16_t data = 0;
 			if (ftdi_read_eeprom_location(ftdi, i, &data)) {
 				fprintf(stderr, "Reading Factory Configuration Data failed\n");
 				i = 0x50;
