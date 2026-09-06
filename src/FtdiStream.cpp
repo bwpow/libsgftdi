@@ -18,16 +18,12 @@ FtdiStream::FtdiStream (FtdiStreams &streams) :
 	bool are_some_transfers = false;
 
 	for (FtdiStreamEntry &stream : _state->streams) {
+		if (nullptr == stream.ftdi) {
+			cThrow ("FTDI context is null"sv);
+		}
+
 		if (stream.ftdi->usb_ctx != _state->usb_ctx) {
 			cThrow ("All streams must use the same USB context"sv);
-		}
-
-		if (_state->read_packetsize > stream.ftdi->max_packet_size) {
-			_state->read_packetsize = stream.ftdi->max_packet_size;
-		}
-
-		if (_state->write_packetsize > stream.ftdi->writebuffer_chunksize) {
-			_state->write_packetsize = stream.ftdi->writebuffer_chunksize;
 		}
 
 		if (stream.read_transfers > 0) {
@@ -36,6 +32,9 @@ FtdiStream::FtdiStream (FtdiStreams &streams) :
 
 				if (0 == stream.read_packets_per_transfer) {
 					cThrow ("Read packets per transfer is zero"sv);
+				}
+				if (0 == stream.ftdi->max_packet_size) {
+					cThrow ("Read packet size is zero"sv);
 				}
 			}
 			else {
@@ -49,6 +48,9 @@ FtdiStream::FtdiStream (FtdiStreams &streams) :
 
 				if (0 == stream.write_packets_per_transfer) {
 					cThrow ("Write packets per transfer is zero"sv);
+				}
+				if (0 == stream.ftdi->writebuffer_chunksize) {
+					cThrow ("Write packet size is zero"sv);
 				}
 
 				if (stream.write_transfers != 1) {
@@ -72,10 +74,13 @@ FtdiStream::FtdiStream (FtdiStreams &streams) :
 	_naked_state = _state.get ();
 }
 
-FtdiStream::~FtdiStream ()
+FtdiStream::~FtdiStream () noexcept
 {
 	stop_thread ();
-	stop_poll ();
+	try {
+		stop_poll ();
+	}
+	catch (...) { /* Destruction must not terminate after polling cleanup. */ }
 
 	_naked_state = nullptr;
 	_state.reset ();

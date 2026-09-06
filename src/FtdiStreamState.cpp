@@ -22,6 +22,9 @@ FtdiStreamState::FtdiStreamState (FtdiStreams &_streams) :
 			cThrow ("No streams were defined"sv);
 		}
 
+		if (nullptr == streams.at (0).ftdi) {
+			cThrow ("FTDI context is null"sv);
+		}
 		usb_ctx = streams.at (0).ftdi->usb_ctx;
 
 		notice_event_fd = ::eventfd (0, EFD_NONBLOCK);

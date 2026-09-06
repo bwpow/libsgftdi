@@ -35,17 +35,8 @@ class FtdiStreamState
 		int usb_epoll_fd {-1};
 		int timer_fd {-1};
 
-		/* Set from ftdi->max_packet_size, usually 64 or 512 bytes */
-		uint32_t read_packetsize {UINT32_MAX};
-
-		/* Set from ftdi->writebuffer_chunksize, usually 4096 bytes */
-		uint32_t write_packetsize {UINT32_MAX};
-
 		/* Timeout in secounds without any activity */
 		uint_fast64_t timeout {10};
-
-		/* Number of cancel loops until forced exit */
-		int cancel_counter {3};
 
 		/* Is thread started */
 		volatile bool is_started_thr {false};
@@ -111,8 +102,11 @@ class FtdiStreamStaticState
 		FtdiStreamState * const state;
 		struct libusb_transfer * transfer {nullptr};
 
+		uint32_t packet_size {0};
 		int buffer_size {0};
 		volatile bool enabled {false};
+		bool submitted {false};
+		bool cancel_requested {false};
 		volatile uint_fast32_t counter_callbacks {0};
 		volatile uint_fast32_t counter_bytes {0};
 

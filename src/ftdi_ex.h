@@ -45,6 +45,8 @@ int ftdi_init_ex (struct ftdi_context *ftdi, struct libusb_context *usb_ctx)
 	return ftdi_read_data_set_chunksize (ftdi, 4096);
 }
 
+void ftdi_deinit_ex (struct ftdi_context *ftdi);
+
 struct ftdi_context *ftdi_new_ex (struct libusb_context *usb_ctx)
 {
 	struct ftdi_context * ftdi = (struct ftdi_context *) malloc (sizeof (struct ftdi_context));
@@ -56,6 +58,7 @@ struct ftdi_context *ftdi_new_ex (struct libusb_context *usb_ctx)
 	memset (ftdi, 0, sizeof (struct ftdi_context));
 
 	if (ftdi_init_ex (ftdi, usb_ctx) != 0) {
+		ftdi_deinit_ex (ftdi);
 		free (ftdi);
 		return NULL;
 	}
@@ -112,6 +115,9 @@ int ftdi_usb_get_strings_ex (struct ftdi_context *ftdi, struct libusb_device *de
 	if (NULL == ftdi || NULL == dev) {
 		return -1;
 	}
+	if ((NULL != manufacturer && mnf_len <= 0) || (NULL != description && desc_len <= 0) || (NULL != serial && serial_len <= 0)) {
+		return -1;
+	}
 
 	const int need_open = (ftdi->usb_dev == NULL);
 	if (need_open) {
@@ -121,6 +127,9 @@ int ftdi_usb_get_strings_ex (struct ftdi_context *ftdi, struct libusb_device *de
 	}
 
 	if (libusb_get_device_descriptor (dev, &desc) < 0) {
+		if (need_open) {
+			ftdi_usb_close_internal (ftdi);
+		}
 		ftdi_error_return (-11, "libusb_get_device_descriptor() failed");
 	}
 

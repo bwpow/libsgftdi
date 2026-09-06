@@ -83,6 +83,11 @@ class FtdiContext
 		explicit FtdiContext (const bool create_libusb_context = true);
 		~FtdiContext ();
 
+		FtdiContext (const FtdiContext &) = delete;
+		FtdiContext& operator= (const FtdiContext &) = delete;
+		FtdiContext (FtdiContext &&) = delete;
+		FtdiContext& operator= (FtdiContext &&) = delete;
+
 		void populate_config (const shaga::INI &ini, const std::string_view section);
 		void populate_config (std::shared_ptr<shaga::INI> ini, const std::string_view section);
 		void populate_config (const shaga::INI *const ini, const std::string_view section);
@@ -237,7 +242,7 @@ class FtdiStream
 
 	public:
 		explicit FtdiStream (FtdiStreams &streams);
-		~FtdiStream ();
+		~FtdiStream () noexcept;
 
 		/* Non-copyable */
 		FtdiStream (FtdiStream const&) = delete;

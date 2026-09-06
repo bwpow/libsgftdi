@@ -241,21 +241,20 @@ struct ftdi_context * FtdiContext::init (struct libusb_context *usb_ctx) try
 
 	clear ();
 
-	if (nullptr == usb_ctx) {
-		if (false == _create_libusb_context) {
-			cThrow ("USB context is not provided"sv);
+	if (true == _create_libusb_context && nullptr == usb_ctx) {
+		ret = ::libusb_init (&_usb_ctx);
+		if (ret != 0) {
+			cThrow ("Unable to init USB: {}"sv, ::libusb_error_name (ret));
 		}
-		else {
-			ret = ::libusb_init (&_usb_ctx);
-			if (ret != 0) {
-				cThrow ("Unable to init USB: {}"sv, ::libusb_error_name (ret));
-			}
-			::libusb_set_pollfd_notifiers (_usb_ctx, nullptr, nullptr, nullptr);
-			_libusb_context_created = true;
-		}
+		::libusb_set_pollfd_notifiers (_usb_ctx, nullptr, nullptr, nullptr);
+		_libusb_context_created = true;
+	}
+	else {
+		/* A null borrowed context selects libusb's valid default context. */
+		_usb_ctx = usb_ctx;
 	}
 
-	_ctx = ::ftdi_new_ex (usb_ctx);
+	_ctx = ::ftdi_new_ex (_usb_ctx);
 
 	if (nullptr == _ctx) {
 		cThrow ("Unable to allocate FTDI context"sv);
@@ -369,6 +368,8 @@ catch (...)
 			_usb_ctx = nullptr;
 		}
 	}
+	_usb_ctx = nullptr;
+	_libusb_context_created = false;
 
 	throw;
 }
@@ -386,6 +387,8 @@ void FtdiContext::clear (void)
 			_usb_ctx = nullptr;
 		}
 	}
+	_usb_ctx = nullptr;
+	_libusb_context_created = false;
 }
 
 struct ftdi_context * FtdiContext::get_context (void) const noexcept

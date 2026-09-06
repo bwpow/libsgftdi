@@ -82,24 +82,38 @@ class FtdiStreamStatic
 			if (nullptr == streamstate) {
 				return;
 			}
+			streamstate->submitted = false;
+			streamstate->cancel_requested = false;
 
 			++streamstate->counter_callbacks;
 
-			if (false == streamstate->enabled) {
-				P::print ("@{},{}: read_callback disabled"sv, streamstate->stream_id, streamstate->transfer_id);
-				return;
-			}
-
 			FtdiStreamState * const state = streamstate->state;
 
-			if (LIBUSB_TRANSFER_CANCELLED == transfer->status || false == state->should_run) {
-				streamstate->enabled = false;
-				cancel (state);
+			if (LIBUSB_TRANSFER_CANCELLED == transfer->status) {
+				if (true == state->should_run && true == streamstate->enabled) {
+					try {
+						streamstate->submit ();
+					}
+					catch (const std::exception &e) {
+						streamstate->enabled = false;
+						error (state, "@{},{}: read callback resubmit - {}"sv, streamstate->stream_id, streamstate->transfer_id, e.what ());
+					}
+					catch (...) {
+						streamstate->enabled = false;
+						error (state, "@{},{}: read callback resubmit - unknown exception"sv, streamstate->stream_id, streamstate->transfer_id);
+					}
+				}
+				return;
+			}
+			if (false == state->should_run || false == streamstate->enabled) {
 				return;
 			}
 
 			try {
 				if (LIBUSB_TRANSFER_COMPLETED == transfer->status) {
+					if (transfer->actual_length < 0 || transfer->actual_length > transfer->length || transfer->actual_length > streamstate->buffer_size) {
+						cThrow ("Invalid read transfer length {}"sv, transfer->actual_length);
+					}
 					/* First two bytes of every transfer contain modem status */
 					if (transfer->actual_length > 2) {
 						state->ts_activity = state->ts_now;
@@ -111,9 +125,9 @@ class FtdiStreamStatic
 //							state->error_spsc.push_back (fmt::format ("len={}, read_packetsize={}"sv, length, state->read_packetsize));
 //						}
 
-						/* One transfer can contain more messages. Each message is at most state->read_packetsize bytes */
+						/* One transfer can contain more messages. Each message is at most packet_size bytes. */
 						while (length > 0) {
-							const uint32_t packetLen = std::min (length, state->read_packetsize);
+							const uint32_t packetLen = std::min (length, streamstate->packet_size);
 							//P::print ("{} {}"sv, length, packetLen);
 
 							FtdiStreamEntry &entry = state->streams[streamstate->stream_id];
@@ -141,9 +155,7 @@ class FtdiStreamStatic
 						entry.read_callback (FtdiStreamEntry::CallbackType::READ_BUFFER, ptr, 2);
 					}
 
-					if (::libusb_submit_transfer (transfer) != LIBUSB_SUCCESS) {
-						cThrow ("Submit transfer failed"sv);
-					}
+					streamstate->submit ();
 				}
 				else {
 					cThrow ("Unexpected LIBUSB_TRANSFER state {}"sv, libusb_transfer_status_name (transfer->status));
@@ -166,46 +178,40 @@ class FtdiStreamStatic
 			if (nullptr == streamstate) {
 				return;
 			}
+			streamstate->submitted = false;
+			streamstate->cancel_requested = false;
 
 			++streamstate->counter_callbacks;
 
-			if (false == streamstate->enabled) {
-				P::print ("@{},{}: write_callback disabled"sv, streamstate->stream_id, streamstate->transfer_id);
-				return;
-			}
-
 			FtdiStreamState * const state = streamstate->state;
 
-			if (LIBUSB_TRANSFER_CANCELLED == transfer->status || false == state->should_run) {
-				streamstate->enabled = false;
-				transfer->length = 0;
-				cancel (state);
-				return;
-			}
-
 			try {
-				//P::print ("@{},{}: confirm {} bytes"sv, streamstate->stream_id, streamstate->transfer_id, transfer->actual_length);
+				if (transfer->actual_length < 0 || transfer->actual_length > transfer->length || transfer->actual_length > streamstate->buffer_size) {
+					cThrow ("Invalid write transfer length {}"sv, transfer->actual_length);
+				}
 
 				if (transfer->actual_length > 0) {
 					streamstate->counter_bytes += transfer->actual_length;
-					transfer->length = state->streams[streamstate->stream_id].write_callback (FtdiStreamEntry::CallbackType::WRITE_CONFIRM_TRANSFER, nullptr, transfer->actual_length);
-					if (transfer->length != 0) {
-						cThrow ("Callback WRITE_CONFIRM_TRANSFER reported error {}"sv, transfer->length);
+					const int callback_ret = state->streams[streamstate->stream_id].write_callback (FtdiStreamEntry::CallbackType::WRITE_CONFIRM_TRANSFER, nullptr, transfer->actual_length);
+					if (callback_ret != 0) {
+						cThrow ("Callback WRITE_CONFIRM_TRANSFER reported error {}"sv, callback_ret);
 					}
 				}
 
-				transfer->length = state->streams[streamstate->stream_id].write_callback (FtdiStreamEntry::CallbackType::WRITE_FILL_BUFFER, reinterpret_cast<char *> (transfer->buffer), streamstate->buffer_size);
-				if (transfer->length < 0) {
-					cThrow ("Callback WRITE_FILL_BUFFER reported error {}"sv, transfer->length);
+				if (LIBUSB_TRANSFER_CANCELLED == transfer->status) {
+					if (true == state->should_run && true == streamstate->enabled) {
+						streamstate->submit ();
+					}
+					return;
 				}
-				else if (0 == transfer->length) {
-					/* Nothing to send, disable this stream */
-					streamstate->enabled = false;
-					//P::print ("@{},{}: write_callback - nothing to transfer, disabling"sv, streamstate->stream_id, streamstate->transfer_id);
+				if (false == state->should_run || false == streamstate->enabled) {
+					return;
 				}
-				else if (::libusb_submit_transfer (transfer) != LIBUSB_SUCCESS) {
-					cThrow ("Submit transfer failed"sv);
+				if (LIBUSB_TRANSFER_COMPLETED != transfer->status) {
+					cThrow ("Unexpected LIBUSB_TRANSFER state {}"sv, libusb_transfer_status_name (transfer->status));
 				}
+
+				streamstate->submit ();
 			}
 			catch (const std::exception &e) {
 				error (state, "@{},{}: write callback - {}"sv, streamstate->stream_id, streamstate->transfer_id, e.what ());
@@ -378,6 +384,43 @@ class FtdiStreamStatic
 		{
 			cancel (state);
 
+			if (nullptr != state->streamstates) {
+				for (auto &entry : *state->streamstates) {
+					try {
+						entry.second.cancel ();
+					}
+					catch (...) { /* Continue draining transfers already submitted. */ }
+				}
+
+				auto has_submitted = [state]() -> bool {
+					for (const auto &entry : *state->streamstates) {
+						if (true == entry.second.submitted) {
+							return true;
+						}
+					}
+					return false;
+				};
+
+				bool event_error_reported {false};
+				while (true == has_submitted ()) {
+					struct timeval wait_time {0, 100'000};
+					const int ret = ::libusb_handle_events_timeout_completed (state->usb_ctx, &wait_time, nullptr);
+					if (LIBUSB_SUCCESS != ret && LIBUSB_ERROR_INTERRUPTED != ret) {
+						if (false == event_error_reported) {
+							try {
+								state->error_spsc.push_back (fmt::format ("Unable to drain libusb transfers: {}"sv, ::libusb_error_name (ret)));
+							}
+							catch (...) { /* Intentionally ignored */ }
+							event_error_reported = true;
+						}
+
+						/* A pending transfer must never be freed. Back off before retrying a broken event source. */
+						struct timespec retry_delay {0, 100'000'000};
+						while (::nanosleep (&retry_delay, &retry_delay) < 0 && EINTR == errno) {}
+					}
+				}
+			}
+
 			::libusb_set_pollfd_notifiers (state->usb_ctx, nullptr, nullptr, nullptr);
 
 			if (state->timer_fd >= 0) {
@@ -447,8 +490,6 @@ class FtdiStreamStatic
 				state->epoll_fd = -1;
 				state->usb_epoll_fd = -1;
 				state->timer_fd = -1;
-
-				state->cancel_counter = 3;
 
 				const uint64_t now = get_monotime_sec ();
 				state->ts_now = now;
@@ -612,21 +653,8 @@ class FtdiStreamStatic
 					}
 					catch (...) { /* Intentionally ignored */ }
 
-					bool are_all_disabled = true;
-					for (auto &entry : *(state->streamstates)) {
-						if (true == entry.second.enabled) {
-							entry.second.cancel ();
-							are_all_disabled = false;
-						}
-					}
-
-					if ((--state->cancel_counter) < 0) {
-						are_all_disabled = true;
-					}
-
-					if (true == are_all_disabled) {
-						return false;
-					}
+					process_cleanup (state);
+					return false;
 				}
 			}
 			catch (...) {
@@ -696,9 +724,17 @@ FtdiStreamStaticState::~FtdiStreamStaticState ()
 
 void FtdiStreamStaticState::init (FtdiStreamEntry &stream)
 {
+	auto calculate_buffer_size = [this](const uint32_t size, const uint_fast32_t count) -> int {
+		if (0 == size || 0 == count || count > (static_cast<uint_fast64_t> (INT_MAX) / size)) {
+			cThrow ("@{},{}: Transfer buffer size is invalid"sv, stream_id, transfer_id);
+		}
+		return static_cast<int> (size * count);
+	};
+
 	if (true == is_reading) {
 		enabled = stream.read_start_enabled;
-		buffer_size = state->read_packetsize * stream.read_packets_per_transfer;
+		packet_size = stream.ftdi->max_packet_size;
+		buffer_size = calculate_buffer_size (packet_size, stream.read_packets_per_transfer);
 
 		::libusb_fill_bulk_transfer (
 			transfer, // the transfer to populate
@@ -712,7 +748,8 @@ void FtdiStreamStaticState::init (FtdiStreamEntry &stream)
 		);
 	} else {
 		enabled = true;
-		buffer_size = state->write_packetsize * stream.write_packets_per_transfer;
+		packet_size = stream.ftdi->writebuffer_chunksize;
+		buffer_size = calculate_buffer_size (packet_size, stream.write_packets_per_transfer);
 		::libusb_fill_bulk_transfer (
 			transfer, // the transfer to populate
 			stream.ftdi->usb_dev, // handle of the device that will handle the transfer
@@ -748,6 +785,9 @@ void FtdiStreamStaticState::submit (void)
 	if (false == state->should_run) {
 		return;
 	}
+	if (true == submitted) {
+		return;
+	}
 
 	if (true == enabled) {
 		if (true == is_reading) {
@@ -759,12 +799,20 @@ void FtdiStreamStaticState::submit (void)
 		if (transfer->length < 0) {
 			cThrow ("@{},{}: Callback WRITE_FILL_BUFFER reported error {}"sv, stream_id, transfer_id, transfer->length);
 		}
+		else if (transfer->length > buffer_size) {
+			cThrow ("@{},{}: Callback WRITE_FILL_BUFFER returned {} bytes for a {} byte buffer"sv, stream_id, transfer_id, transfer->length, buffer_size);
+		}
 		else if (0 == transfer->length) {
 			/* Nothing to transfer */
 			enabled = false;
 		}
-		else if (::libusb_submit_transfer (transfer) != 0) {
-			cThrow ("@{},{}: Submit transfer error"sv, stream_id, transfer_id);
+		else {
+			const int ret = ::libusb_submit_transfer (transfer);
+			if (LIBUSB_SUCCESS != ret) {
+				cThrow ("@{},{}: Submit transfer error: {}"sv, stream_id, transfer_id, ::libusb_error_name (ret));
+			}
+			submitted = true;
+			cancel_requested = false;
 		}
 	}
 }
@@ -775,8 +823,15 @@ void FtdiStreamStaticState::cancel (void)
 		cThrow ("@{},{}: Unable to cancel null transfer"sv, stream_id, transfer_id);
 	}
 
-	if (true == enabled) {
-		::libusb_cancel_transfer (transfer);
+	enabled = false;
+	if (true == submitted && false == cancel_requested) {
+		const int ret = ::libusb_cancel_transfer (transfer);
+		if (LIBUSB_SUCCESS == ret) {
+			cancel_requested = true;
+		}
+		else if (LIBUSB_ERROR_NOT_FOUND != ret) {
+			cThrow ("@{},{}: Cancel transfer error: {}"sv, stream_id, transfer_id, ::libusb_error_name (ret));
+		}
 	}
 }
 
@@ -827,11 +882,32 @@ void FtdiStream::stop_poll (void)
 
 		_naked_state->issue_notice ();
 
-		/* Now wait for all streams to finish */
-		while (FtdiStreamStatic::process_step (_naked_state));
+		std::exception_ptr failure;
+		try {
+			/* Now wait for all streams to finish */
+			while (FtdiStreamStatic::process_step (_naked_state));
+		}
+		catch (...) {
+			failure = std::current_exception ();
+		}
+
+		if (nullptr != _naked_state->streamstates) {
+			try {
+				FtdiStreamStatic::process_reset_stream_entry (_naked_state, true);
+			}
+			catch (...) {
+				if (nullptr == failure) {
+					failure = std::current_exception ();
+				}
+			}
+		}
 
 		FtdiStreamStatic::process_cleanup (_naked_state);
 		_naked_state->is_started_poll = false;
+
+		if (nullptr != failure) {
+			std::rethrow_exception (failure);
+		}
 	}
 }
 

@@ -48,7 +48,22 @@ ST_DEBUGFLAGS = $(DEBUGFLAGS) -include sgftdi_st.h
 ST_DEBUGCFLAGS = $(DEBUGCFLAGS)
 
 TESTFLAGS = -g -Iinclude
-TESTLIBS = -lgtest -lusb-1.0
+TESTLIBS = -lgtest -lusb-1.0 \
+	-Wl,--wrap=libusb_init \
+	-Wl,--wrap=libusb_exit \
+	-Wl,--wrap=libusb_submit_transfer \
+	-Wl,--wrap=libusb_cancel_transfer \
+	-Wl,--wrap=libusb_handle_events_timeout \
+	-Wl,--wrap=libusb_handle_events_timeout_completed \
+	-Wl,--wrap=libusb_pollfds_handle_timeouts \
+	-Wl,--wrap=libusb_get_pollfds \
+	-Wl,--wrap=libusb_free_pollfds \
+	-Wl,--wrap=libusb_set_pollfd_notifiers \
+	-Wl,--wrap=libusb_free_transfer \
+	-Wl,--wrap=libusb_open \
+	-Wl,--wrap=libusb_close \
+	-Wl,--wrap=libusb_get_device_descriptor \
+	-Wl,--wrap=libusb_get_string_descriptor_ascii
 MT_TESTDIR = $(OBJDIR)/test_mt
 MT_TESTBIN = $(BINDIR)/test_mt.$(BINEXT)
 MT_TESTOBJS = $(addprefix $(MT_TESTDIR)/, $(TESTSOURCES:.cpp=.o))
@@ -101,10 +116,10 @@ $(MT_DEBUGLIB): $(MT_DEBUGOBJS)
 	$(RM) $@
 	$(AR) rcsD $@ $^
 
-$(MT_DEBUGDIR)/%.o:%.cpp
+$(MT_DEBUGDIR)/%.o:%.cpp | prep
 	$(GPP) $(MT_DEBUGFLAGS) $(MT_CPPFLAGS) -c $< -o $@
 
-$(MT_DEBUGDIR)/%.o:%.c
+$(MT_DEBUGDIR)/%.o:%.c | prep
 	$(GCC) $(MT_DEBUGCFLAGS) $(MT_CFLAGS) -c $< -o $@
 
 # Single thread
@@ -114,10 +129,10 @@ $(ST_DEBUGLIB): $(ST_DEBUGOBJS)
 	$(RM) $@
 	$(AR) rcsD $@ $^
 
-$(ST_DEBUGDIR)/%.o:%.cpp
+$(ST_DEBUGDIR)/%.o:%.cpp | prep
 	$(GPP) $(ST_DEBUGFLAGS) $(ST_CPPFLAGS) -c $< -o $@
 
-$(ST_DEBUGDIR)/%.o:%.c
+$(ST_DEBUGDIR)/%.o:%.c | prep
 	$(GCC) $(ST_DEBUGCFLAGS) $(ST_CFLAGS) -c $< -o $@
 
 #############################################################################
@@ -130,10 +145,10 @@ $(MT_FULLLIB): $(MT_FULLOBJS)
 	$(STRIP) $^
 	$(AR) rcsD $@ $^
 
-$(MT_FULLDIR)/%.o:%.cpp
+$(MT_FULLDIR)/%.o:%.cpp | prep
 	$(GPP) $(MT_FULLFLAGS) $(MT_CPPFLAGS) -c $< -o $@
 
-$(MT_FULLDIR)/%.o:%.c
+$(MT_FULLDIR)/%.o:%.c | prep
 	$(GCC) $(MT_FULLCFLAGS) $(MT_CFLAGS) -c $< -o $@
 
 # Single thread
@@ -144,10 +159,10 @@ $(ST_FULLLIB): $(ST_FULLOBJS)
 	$(STRIP) $^
 	$(AR) rcsD $@ $^
 
-$(ST_FULLDIR)/%.o:%.cpp
+$(ST_FULLDIR)/%.o:%.cpp | prep
 	$(GPP) $(ST_FULLFLAGS) $(ST_CPPFLAGS) -c $< -o $@
 
-$(ST_FULLDIR)/%.o:%.c
+$(ST_FULLDIR)/%.o:%.c | prep
 	$(GCC) $(ST_FULLCFLAGS) $(ST_CFLAGS) -c $< -o $@
 
 #############################################################################
@@ -160,10 +175,10 @@ $(MT_LITELIB): $(MT_LITEOBJS)
 	$(STRIP) $^
 	$(AR) rcsD $@ $^
 
-$(MT_LITEDIR)/%.o:%.cpp
+$(MT_LITEDIR)/%.o:%.cpp | prep
 	$(GPP) $(MT_LITEFLAGS) $(MT_CPPFLAGS) -c $< -o $@
 
-$(MT_LITEDIR)/%.o:%.c
+$(MT_LITEDIR)/%.o:%.c | prep
 	$(GCC) $(MT_LITECFLAGS) $(MT_CFLAGS) -c $< -o $@
 
 # Single thread
@@ -174,10 +189,10 @@ $(ST_LITELIB): $(ST_LITEOBJS)
 	$(STRIP) $^
 	$(AR) rcsD $@ $^
 
-$(ST_LITEDIR)/%.o:%.cpp
+$(ST_LITEDIR)/%.o:%.cpp | prep
 	$(GPP) $(ST_LITEFLAGS) $(ST_CPPFLAGS) -c $< -o $@
 
-$(ST_LITEDIR)/%.o:%.c
+$(ST_LITEDIR)/%.o:%.c | prep
 	$(GCC) $(ST_LITECFLAGS) $(ST_CFLAGS) -c $< -o $@
 
 #############################################################################
@@ -188,7 +203,7 @@ test_mt: | debug_mt $(MT_TESTBIN)
 $(MT_TESTBIN): $(MT_TESTOBJS) $(MT_DEBUGLIB)
 	$(GPP) $(MT_TESTFLAGS) $(MT_LDFLAGS) $^ $(MT_TESTLIBS) $(MT_LIBS) -o $@
 
-$(MT_TESTDIR)/%.o:%.cpp
+$(MT_TESTDIR)/%.o:%.cpp | prep
 	$(GPP) $(MT_TESTFLAGS) $(MT_CPPFLAGS) -c $< -o $@
 
 # Single thread
@@ -197,7 +212,7 @@ test_st: | debug_st $(ST_TESTBIN)
 $(ST_TESTBIN): $(ST_TESTOBJS) $(ST_DEBUGLIB)
 	$(GPP) $(ST_TESTFLAGS) $(ST_LDFLAGS) $^ $(ST_TESTLIBS) $(ST_LIBS) -o $@
 
-$(ST_TESTDIR)/%.o:%.cpp
+$(ST_TESTDIR)/%.o:%.cpp | prep
 	$(GPP) $(ST_TESTFLAGS) $(ST_CPPFLAGS) -c $< -o $@
 
 #############################################################################
